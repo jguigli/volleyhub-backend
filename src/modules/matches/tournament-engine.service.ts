@@ -175,12 +175,17 @@ export class TournamentEngineService {
   ): boolean {
     let changed = false;
     const cmax = Math.max(1, courtCount);
-    const occupied = new Set<number>();
+    const occupiedCourts = new Set<number>();
+    const busyTeams = new Set<number>();
+
     for (const f of fixtures) {
-      if (f.status === FixtureStatus.LIVE && f.courtIndex != null) {
-        occupied.add(f.courtIndex);
+      if (f.status === FixtureStatus.LIVE) {
+        if (f.courtIndex != null) occupiedCourts.add(f.courtIndex);
+        if (f.teamAIndex != null && f.teamAIndex >= 0) busyTeams.add(f.teamAIndex);
+        if (f.teamBIndex != null && f.teamBIndex >= 0) busyTeams.add(f.teamBIndex);
       }
     }
+
     for (const f of fixtures) {
       if (f.status !== FixtureStatus.READY) {
         continue;
@@ -188,12 +193,21 @@ export class TournamentEngineService {
       if (f.courtIndex != null) {
         continue;
       }
+      // Skip if either team is already playing on another court
+      if (f.teamAIndex != null && f.teamAIndex >= 0 && busyTeams.has(f.teamAIndex)) {
+        continue;
+      }
+      if (f.teamBIndex != null && f.teamBIndex >= 0 && busyTeams.has(f.teamBIndex)) {
+        continue;
+      }
       for (let c = 0; c < cmax; c += 1) {
-        if (!occupied.has(c)) {
+        if (!occupiedCourts.has(c)) {
           f.courtIndex = c;
           f.status = FixtureStatus.LIVE;
           f.startedAt = new Date();
-          occupied.add(c);
+          occupiedCourts.add(c);
+          if (f.teamAIndex != null && f.teamAIndex >= 0) busyTeams.add(f.teamAIndex);
+          if (f.teamBIndex != null && f.teamBIndex >= 0) busyTeams.add(f.teamBIndex);
           changed = true;
           break;
         }

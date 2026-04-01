@@ -42,6 +42,12 @@ export class TournamentFixtureMatch {
   @Column({ type: 'int', name: 'score_b', default: 0 })
   scoreB: number;
 
+  @Column({ name: 'score_a_confirmed', type: 'boolean', default: false })
+  scoreAConfirmed: boolean;
+
+  @Column({ name: 'score_b_confirmed', type: 'boolean', default: false })
+  scoreBConfirmed: boolean;
+
   @Column({ type: 'int', name: 'court_index', nullable: true })
   courtIndex: number | null;
 

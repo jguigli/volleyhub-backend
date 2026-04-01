@@ -19,6 +19,8 @@ import { PostMatchChatMessageDto } from './dto/post-match-chat-message.dto';
 import { MuteMatchChatUserDto } from './dto/mute-match-chat-user.dto';
 import { RemoveMatchParticipantDto } from './dto/remove-match-participant.dto';
 import { InvitePlayerDto } from './dto/invite-player.dto';
+import { SubmitFixtureScoreDto } from './dto/submit-fixture-score.dto';
+import { OverrideFixtureScoreDto } from './dto/override-fixture-score.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { User } from '../users/user.entity';
@@ -73,6 +75,40 @@ export class MatchesController {
         ? (eventFormat as EventFormat)
         : undefined;
     return this.matchesService.getUserMatchStatsByFormat(userId, safeFormat);
+  }
+
+  @Post('fixtures/:fixtureId/score')
+  @UseGuards(JwtAuthGuard)
+  submitFixtureScore(
+    @Param('fixtureId') fixtureId: string,
+    @CurrentUser() user: User,
+    @Body() dto: SubmitFixtureScoreDto,
+  ) {
+    return this.matchesService.submitFixtureScore(fixtureId, user.id, dto.score);
+  }
+
+  @Post('fixtures/:fixtureId/confirm')
+  @UseGuards(JwtAuthGuard)
+  confirmFixtureScore(
+    @Param('fixtureId') fixtureId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.matchesService.confirmFixtureScore(fixtureId, user.id);
+  }
+
+  @Patch('fixtures/:fixtureId/override')
+  @UseGuards(JwtAuthGuard)
+  overrideFixtureScore(
+    @Param('fixtureId') fixtureId: string,
+    @CurrentUser() user: User,
+    @Body() dto: OverrideFixtureScoreDto,
+  ) {
+    return this.matchesService.organizerOverrideFixtureScore(
+      fixtureId,
+      user.id,
+      dto.scoreA,
+      dto.scoreB,
+    );
   }
 
   @Get(':id/chat/messages')

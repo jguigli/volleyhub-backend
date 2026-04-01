@@ -33,6 +33,12 @@ CREATE TABLE IF NOT EXISTS tournament_fixtures (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Run once if table already exists (confirmation flags for live scoring)
+ALTER TABLE tournament_fixtures
+  ADD COLUMN IF NOT EXISTS score_a_confirmed boolean NOT NULL DEFAULT false;
+ALTER TABLE tournament_fixtures
+  ADD COLUMN IF NOT EXISTS score_b_confirmed boolean NOT NULL DEFAULT false;
+
 CREATE INDEX IF NOT EXISTS idx_tournament_fixtures_event
   ON tournament_fixtures (event_match_id);
 

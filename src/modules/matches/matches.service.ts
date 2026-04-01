@@ -127,7 +127,7 @@ export class MatchesService {
         );
       }
       maxPlayers = teamCount * teamSize;
-      if (maxPlayers < 4 || maxPlayers > 48) {
+      if (maxPlayers < 4 || maxPlayers > 96) {
         throw new BadRequestException('Invalid tournament capacity');
       }
     } else {
@@ -280,7 +280,6 @@ export class MatchesService {
       JOIN courts c ON c.id = m.court_id
       JOIN users u ON u.id = m.creator_id
       WHERE m.status IN ('open', 'full')
-        AND m.scheduled_at > NOW()
     `;
 
     const params: (string | number)[] = [];
@@ -1059,6 +1058,207 @@ export class MatchesService {
     return this.findById(matchId);
   }
 
+  private getFixtureSideForUser(
+    fixture: TournamentFixtureMatch,
+    match: Match,
+    userId: string,
+  ): 'A' | 'B' | null {
+    const p = match.participants.find((x) => x.userId === userId);
+    if (!p || p.teamIndex == null) {
+      return null;
+    }
+    if (
+      fixture.teamAIndex != null &&
+      p.teamIndex === fixture.teamAIndex
+    ) {
+      return 'A';
+    }
+    if (
+      fixture.teamBIndex != null &&
+      p.teamIndex === fixture.teamBIndex
+    ) {
+      return 'B';
+    }
+    return null;
+  }
+
+  private async emitTournamentSocket(matchId: string): Promise<void> {
+    const m = await this.matchRepo.findOne({ where: { id: matchId } });
+    if (!m) {
+      return;
+    }
+    this.matchesGateway.broadcastMatchUpdate(matchId, {
+      matchId,
+      currentPlayers: m.currentPlayers,
+      maxPlayers: m.maxPlayers,
+      status: m.status,
+      courtId: m.courtId,
+      tournamentStateUpdated: true,
+    });
+  }
+
+  async submitFixtureScore(
+    fixtureId: string,
+    userId: string,
+    score: number,
+  ): Promise<TournamentFixtureMatch> {
+    if (!Number.isInteger(score) || score < 0) {
+      throw new BadRequestException('Invalid score');
+    }
+    const fixture = await this.fixtureRepo.findOne({ where: { id: fixtureId } });
+    if (!fixture) {
+      throw new NotFoundException('Fixture not found');
+    }
+    const match = await this.findById(fixture.eventMatchId);
+    if (match.eventFormat !== EventFormat.TOURNAMENT) {
+      throw new BadRequestException('Not a tournament match');
+    }
+    if (fixture.status !== FixtureStatus.LIVE) {
+      throw new BadRequestException('Fixture is not live');
+    }
+    const side = this.getFixtureSideForUser(fixture, match, userId);
+    if (!side) {
+      throw new ForbiddenException('You are not on a team in this fixture');
+    }
+    if (side === 'A' && fixture.scoreAConfirmed) {
+      throw new BadRequestException('Your score is already locked');
+    }
+    if (side === 'B' && fixture.scoreBConfirmed) {
+      throw new BadRequestException('Your score is already locked');
+    }
+    if (side === 'A') {
+      fixture.scoreA = score;
+    } else {
+      fixture.scoreB = score;
+    }
+    await this.fixtureRepo.save(fixture);
+    await this.persistTournamentGamesJson(fixture.eventMatchId);
+    await this.emitTournamentSocket(fixture.eventMatchId);
+    return this.fixtureRepo.findOneOrFail({ where: { id: fixtureId } });
+  }
+
+  async confirmFixtureScore(
+    fixtureId: string,
+    userId: string,
+  ): Promise<TournamentFixtureMatch> {
+    const fixture = await this.fixtureRepo.findOne({ where: { id: fixtureId } });
+    if (!fixture) {
+      throw new NotFoundException('Fixture not found');
+    }
+    const match = await this.findById(fixture.eventMatchId);
+    if (match.eventFormat !== EventFormat.TOURNAMENT) {
+      throw new BadRequestException('Not a tournament match');
+    }
+    if (fixture.status !== FixtureStatus.LIVE) {
+      throw new BadRequestException('Fixture is not live');
+    }
+    const side = this.getFixtureSideForUser(fixture, match, userId);
+    if (!side) {
+      throw new ForbiddenException('You are not on a team in this fixture');
+    }
+    if (side === 'A' && fixture.scoreAConfirmed) {
+      throw new BadRequestException('Already confirmed');
+    }
+    if (side === 'B' && fixture.scoreBConfirmed) {
+      throw new BadRequestException('Already confirmed');
+    }
+    const pts = match.tournamentPointsPerMatch ?? 21;
+    const nextAConf = side === 'A' ? true : fixture.scoreAConfirmed;
+    const nextBConf = side === 'B' ? true : fixture.scoreBConfirmed;
+    if (nextAConf && nextBConf) {
+      const sa = fixture.scoreA;
+      const sb = fixture.scoreB;
+      if (sa === sb) {
+        throw new BadRequestException('Scores cannot be tied');
+      }
+      if (Math.max(sa, sb) < pts) {
+        throw new BadRequestException(
+          `A team must reach at least ${pts} points to finish`,
+        );
+      }
+    }
+    if (side === 'A') {
+      fixture.scoreAConfirmed = true;
+    } else {
+      fixture.scoreBConfirmed = true;
+    }
+    await this.fixtureRepo.save(fixture);
+    const fresh = await this.fixtureRepo.findOneOrFail({
+      where: { id: fixtureId },
+    });
+    const courts = Math.max(1, match.tournamentCourtCount ?? 1);
+
+    if (fresh.scoreAConfirmed && fresh.scoreBConfirmed) {
+      await this.tournamentEngine.run(fixture.eventMatchId, pts, courts);
+      await this.persistTournamentGamesJson(fixture.eventMatchId);
+      const reloadedFx = await this.fixtureRepo.find({
+        where: { eventMatchId: fixture.eventMatchId },
+        order: { round: 'ASC', order: 'ASC' },
+      });
+      const matchToSave = await this.matchRepo.findOne({
+        where: { id: fixture.eventMatchId },
+        relations: ['participants'],
+      });
+      if (!matchToSave) {
+        throw new NotFoundException('Match not found');
+      }
+      matchToSave.tournamentGames =
+        this.projectTournamentGamesFromFixtures(reloadedFx);
+      const allFinished =
+        reloadedFx.length > 0 &&
+        reloadedFx.every((f) => f.status === FixtureStatus.FINISHED);
+      matchToSave.status = allFinished
+        ? MatchStatus.COMPLETED
+        : this.statusByCapacity(matchToSave);
+      await this.matchRepo.save(matchToSave);
+    } else {
+      await this.persistTournamentGamesJson(fixture.eventMatchId);
+    }
+    await this.emitTournamentSocket(fixture.eventMatchId);
+    return this.fixtureRepo.findOneOrFail({ where: { id: fixtureId } });
+  }
+
+  async organizerOverrideFixtureScore(
+    fixtureId: string,
+    organizerId: string,
+    scoreA: number,
+    scoreB: number,
+  ): Promise<TournamentFixtureMatch> {
+    if (
+      !Number.isInteger(scoreA) ||
+      !Number.isInteger(scoreB) ||
+      scoreA < 0 ||
+      scoreB < 0
+    ) {
+      throw new BadRequestException('Invalid scores');
+    }
+    const fixture = await this.fixtureRepo.findOne({ where: { id: fixtureId } });
+    if (!fixture) {
+      throw new NotFoundException('Fixture not found');
+    }
+    const match = await this.findById(fixture.eventMatchId);
+    if (match.eventFormat !== EventFormat.TOURNAMENT) {
+      throw new BadRequestException('Not a tournament match');
+    }
+    if (match.creatorId !== organizerId) {
+      throw new ForbiddenException('Only the organizer can override scores');
+    }
+    if (fixture.scoreAConfirmed && fixture.scoreBConfirmed) {
+      throw new ForbiddenException('Both scores are locked');
+    }
+    if (fixture.status === FixtureStatus.FINISHED) {
+      throw new BadRequestException('Fixture is already finished');
+    }
+    fixture.scoreA = scoreA;
+    fixture.scoreB = scoreB;
+    fixture.scoreAConfirmed = false;
+    fixture.scoreBConfirmed = false;
+    await this.fixtureRepo.save(fixture);
+    await this.persistTournamentGamesJson(fixture.eventMatchId);
+    await this.emitTournamentSocket(fixture.eventMatchId);
+    return this.fixtureRepo.findOneOrFail({ where: { id: fixtureId } });
+  }
+
   async removeParticipant(
     matchId: string,
     organizerId: string,
@@ -1119,6 +1319,16 @@ export class MatchesService {
 
     if (match.status === MatchStatus.CANCELLED) {
       throw new BadRequestException('Match is cancelled');
+    }
+
+    // Block team changes once the event has started (live)
+    const isLive =
+      match.status !== MatchStatus.COMPLETED &&
+      new Date(match.scheduledAt).getTime() <= Date.now();
+    if (isLive && teamIndex !== null) {
+      throw new BadRequestException(
+        'Teams are locked while the event is in progress',
+      );
     }
 
     const participant = await this.participantRepo.findOne({
@@ -1386,6 +1596,8 @@ export class MatchesService {
       teamBIndex: f.teamBIndex ?? -1,
       scoreA: f.scoreA,
       scoreB: f.scoreB,
+      scoreAConfirmed: f.scoreAConfirmed,
+      scoreBConfirmed: f.scoreBConfirmed,
       courtIndex: f.courtIndex ?? 0,
       round: f.round,
       order: f.order,
