@@ -9,17 +9,17 @@ import { OptionalJwtAuthGuard } from '../../src/common/guards/optional-jwt-auth.
 describe('Users routes (integration)', () => {
   let app: INestApplication;
   const usersService = {
-    getIncomingFollowRequests: jest.fn().mockResolvedValue([]),
+    getIncomingFollowRequests: jest.fn().mockResolvedValue([{ id: 'fr1', fromUserId: 'u3' }]),
     sendFollowRequest: jest.fn().mockResolvedValue({ ok: true }),
     cancelFollowRequest: jest.fn().mockResolvedValue({ ok: true }),
     acceptFollowRequest: jest.fn().mockResolvedValue({ ok: true }),
     declineFollowRequest: jest.fn().mockResolvedValue({ ok: true }),
-    getPublicProfile: jest.fn().mockResolvedValue({ id: 'u2' }),
-    getFollowers: jest.fn().mockResolvedValue([]),
-    getFollowing: jest.fn().mockResolvedValue([]),
+    getPublicProfile: jest.fn().mockResolvedValue({ id: 'u2', username: 'bob' }),
+    getFollowers: jest.fn().mockResolvedValue([{ id: 'u3' }]),
+    getFollowing: jest.fn().mockResolvedValue([{ id: 'u4' }]),
     follow: jest.fn().mockResolvedValue({ ok: true }),
     unfollow: jest.fn().mockResolvedValue({ ok: true }),
-    updateProfile: jest.fn().mockResolvedValue({ id: 'u-auth' }),
+    updateProfile: jest.fn().mockResolvedValue({ id: 'u-auth', bio: 'Updated' }),
   };
 
   const authGuard: CanActivate = {
@@ -49,29 +49,106 @@ describe('Users routes (integration)', () => {
     await app.close();
   });
 
-  it('covers users routes', async () => {
-    await request(app.getHttpServer()).get('/users/me/incoming-follow-requests').expect(200);
-    await request(app.getHttpServer()).post('/users/u2/follow-requests').send({}).expect(201);
-    await request(app.getHttpServer()).delete('/users/u2/follow-requests').expect(200);
-    await request(app.getHttpServer()).post('/users/u2/follow-requests/accept').send({}).expect(201);
-    await request(app.getHttpServer()).post('/users/u2/follow-requests/decline').send({}).expect(201);
-    await request(app.getHttpServer()).get('/users/u2').expect(200);
-    await request(app.getHttpServer()).get('/users/u2/followers').expect(200);
-    await request(app.getHttpServer()).get('/users/u2/following').expect(200);
-    await request(app.getHttpServer()).post('/users/u2/follow').send({}).expect(201);
-    await request(app.getHttpServer()).delete('/users/u2/follow').expect(200);
-    await request(app.getHttpServer()).patch('/users/me').send({ bio: 'Hello' }).expect(200);
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
 
-    expect(usersService.getIncomingFollowRequests).toHaveBeenCalled();
-    expect(usersService.sendFollowRequest).toHaveBeenCalledWith('u-auth', 'u2');
-    expect(usersService.cancelFollowRequest).toHaveBeenCalledWith('u-auth', 'u2');
-    expect(usersService.acceptFollowRequest).toHaveBeenCalledWith('u-auth', 'u2');
-    expect(usersService.declineFollowRequest).toHaveBeenCalledWith('u-auth', 'u2');
-    expect(usersService.getPublicProfile).toHaveBeenCalled();
+  it('GET /users/:id -> 200, calls getPublicProfile(id, requesterId)', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/users/u2')
+      .expect(200);
+
+    expect(usersService.getPublicProfile).toHaveBeenCalledWith('u2', 'u-auth');
+    expect(res.body).toEqual({ id: 'u2', username: 'bob' });
+  });
+
+  it('GET /users/:id/followers -> 200', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/users/u2/followers')
+      .expect(200);
+
     expect(usersService.getFollowers).toHaveBeenCalledWith('u2');
+    expect(res.body).toEqual([{ id: 'u3' }]);
+  });
+
+  it('GET /users/:id/following -> 200', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/users/u2/following')
+      .expect(200);
+
     expect(usersService.getFollowing).toHaveBeenCalledWith('u2');
+    expect(res.body).toEqual([{ id: 'u4' }]);
+  });
+
+  it('POST /users/:id/follow -> 201, calls follow(authUser, id)', async () => {
+    await request(app.getHttpServer())
+      .post('/users/u2/follow')
+      .send({})
+      .expect(201);
+
     expect(usersService.follow).toHaveBeenCalledWith('u-auth', 'u2');
+  });
+
+  it('DELETE /users/:id/follow -> 200, calls unfollow(authUser, id)', async () => {
+    await request(app.getHttpServer())
+      .delete('/users/u2/follow')
+      .expect(200);
+
     expect(usersService.unfollow).toHaveBeenCalledWith('u-auth', 'u2');
-    expect(usersService.updateProfile).toHaveBeenCalledWith('u-auth', { bio: 'Hello' });
+  });
+
+  it('PATCH /users/me -> 200, calls updateProfile(authUser, dto)', async () => {
+    const dto = { bio: 'Hello world' };
+    const res = await request(app.getHttpServer())
+      .patch('/users/me')
+      .send(dto)
+      .expect(200);
+
+    expect(usersService.updateProfile).toHaveBeenCalledWith('u-auth', { bio: 'Hello world' });
+    expect(res.body).toHaveProperty('id', 'u-auth');
+  });
+
+  it('POST /users/:id/follow-requests -> 201, calls sendFollowRequest', async () => {
+    await request(app.getHttpServer())
+      .post('/users/u2/follow-requests')
+      .send({})
+      .expect(201);
+
+    expect(usersService.sendFollowRequest).toHaveBeenCalledWith('u-auth', 'u2');
+  });
+
+  it('DELETE /users/:id/follow-requests -> 200, calls cancelFollowRequest', async () => {
+    await request(app.getHttpServer())
+      .delete('/users/u2/follow-requests')
+      .expect(200);
+
+    expect(usersService.cancelFollowRequest).toHaveBeenCalledWith('u-auth', 'u2');
+  });
+
+  it('POST /users/:id/follow-requests/accept -> 201, calls acceptFollowRequest', async () => {
+    await request(app.getHttpServer())
+      .post('/users/u2/follow-requests/accept')
+      .send({})
+      .expect(201);
+
+    expect(usersService.acceptFollowRequest).toHaveBeenCalledWith('u-auth', 'u2');
+  });
+
+  it('POST /users/:id/follow-requests/decline -> 201, calls declineFollowRequest', async () => {
+    await request(app.getHttpServer())
+      .post('/users/u2/follow-requests/decline')
+      .send({})
+      .expect(201);
+
+    expect(usersService.declineFollowRequest).toHaveBeenCalledWith('u-auth', 'u2');
+  });
+
+  it('GET /users/me/incoming-follow-requests -> 200', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/users/me/incoming-follow-requests')
+      .expect(200);
+
+    expect(usersService.getIncomingFollowRequests).toHaveBeenCalledWith('u-auth');
+    expect(res.body).toEqual([{ id: 'fr1', fromUserId: 'u3' }]);
   });
 });

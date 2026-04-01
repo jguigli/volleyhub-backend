@@ -40,7 +40,7 @@ export class TournamentGeneratorService {
     system: TournamentSystem,
     teamCount: number,
   ): FixtureRowInput[] {
-    if (teamCount < 2) {
+    if (teamCount < 3) {
       return [];
     }
     switch (system) {

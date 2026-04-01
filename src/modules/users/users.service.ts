@@ -9,6 +9,7 @@ import { User } from './user.entity';
 import { Follow } from './follow.entity';
 import { FollowRequest } from './follow-request.entity';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { RedisService } from '../redis/redis.service';
 
 export interface PublicProfile {
   id: string;
@@ -40,7 +41,16 @@ export class UsersService {
     private readonly followRepo: Repository<Follow>,
     @InjectRepository(FollowRequest)
     private readonly followRequestRepo: Repository<FollowRequest>,
+    private readonly redisService: RedisService,
   ) {}
+
+  private profileCacheKey(userId: string): string {
+    return `user:profile:${userId}`;
+  }
+
+  private async invalidateProfileCache(userId: string): Promise<void> {
+    await this.redisService.del(this.profileCacheKey(userId));
+  }
 
   async findById(id: string): Promise<Partial<User>> {
     const user = await this.userRepo.findOne({ where: { id } });
@@ -52,28 +62,35 @@ export class UsersService {
     id: string,
     requesterId?: string,
   ): Promise<PublicProfile | PublicProfileWithStatus> {
-    const user = await this.userRepo.findOne({ where: { id } });
-    if (!user) throw new NotFoundException('User not found');
+    // Cache base profile (without requester-specific fields)
+    const cacheKey = this.profileCacheKey(id);
+    let base = await this.redisService.getJson<PublicProfile>(cacheKey);
 
-    const [followersCount, followingCount] = await Promise.all([
-      this.followRepo.count({ where: { followingId: id } }),
-      this.followRepo.count({ where: { followerId: id } }),
-    ]);
+    if (!base) {
+      const user = await this.userRepo.findOne({ where: { id } });
+      if (!user) throw new NotFoundException('User not found');
 
-    const base: PublicProfile = {
-      id: user.id,
-      username: user.username,
-      skillLevel: user.skillLevel,
-      position: user.position,
-      club: user.club ?? null,
-      competition: user.competition ?? null,
-      league: user.league ?? null,
-      profilePicture: user.profilePicture ?? null,
-      bio: user.bio ?? null,
-      createdAt: user.createdAt,
-      followersCount,
-      followingCount,
-    };
+      const [followersCount, followingCount] = await Promise.all([
+        this.followRepo.count({ where: { followingId: id } }),
+        this.followRepo.count({ where: { followerId: id } }),
+      ]);
+
+      base = {
+        id: user.id,
+        username: user.username,
+        skillLevel: user.skillLevel,
+        position: user.position,
+        club: user.club ?? null,
+        competition: user.competition ?? null,
+        league: user.league ?? null,
+        profilePicture: user.profilePicture ?? null,
+        bio: user.bio ?? null,
+        createdAt: user.createdAt,
+        followersCount,
+        followingCount,
+      };
+      await this.redisService.setJson(cacheKey, base, 300); // 5 min TTL
+    }
 
     if (!requesterId) return base;
 
@@ -113,13 +130,19 @@ export class UsersService {
     if (existing) return; // idempotent
 
     await this.followRepo.save({ followerId, followingId });
+    await this.invalidateProfileCache(followerId);
+    await this.invalidateProfileCache(followingId);
   }
 
   async unfollow(followerId: string, followingId: string): Promise<void> {
     const follow = await this.followRepo.findOne({
       where: { followerId, followingId },
     });
-    if (follow) await this.followRepo.remove(follow);
+    if (follow) {
+      await this.followRepo.remove(follow);
+      await this.invalidateProfileCache(followerId);
+      await this.invalidateProfileCache(followingId);
+    }
   }
 
   async sendFollowRequest(requesterId: string, targetId: string): Promise<void> {
@@ -251,6 +274,7 @@ export class UsersService {
     }
 
     const saved = await this.userRepo.save(user);
+    await this.invalidateProfileCache(userId);
     return this.sanitize(saved);
   }
 

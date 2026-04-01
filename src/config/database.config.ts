@@ -1,7 +1,9 @@
 import { registerAs } from '@nestjs/config';
 
-export default registerAs('database', () => ({
-  url:
-    process.env.DATABASE_URL ??
-    'postgresql://volley:volley_secret@localhost:5432/volleyfinder',
-}));
+export default registerAs('database', () => {
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error('DATABASE_URL environment variable is required');
+  }
+  return { url };
+});

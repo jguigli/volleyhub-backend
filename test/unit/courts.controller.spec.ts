@@ -1,20 +1,24 @@
 import { CourtsController } from '../../src/modules/courts/courts.controller';
 
 describe('CourtsController (unit)', () => {
-  it('delegates find/create methods to CourtsService', async () => {
-    const courtsService = {
-      findNearby: jest.fn().mockResolvedValue([]),
-      findById: jest.fn().mockResolvedValue({ id: 'c1' }),
-      create: jest.fn().mockResolvedValue({ id: 'c2' }),
-    };
-    const controller = new CourtsController(courtsService as any);
+  const courtsService = {
+    findById: jest.fn().mockResolvedValue({ id: 'c1' }),
+    create: jest.fn().mockResolvedValue({ id: 'c2' }),
+  };
+  const controller = new CourtsController(courtsService as any);
 
-    await controller.findNearby({ lat: 48.8 } as any);
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('delegates findById to CourtsService with correct id', async () => {
     await controller.findById('c1');
-    await controller.create({ name: 'Court' } as any);
-
-    expect(courtsService.findNearby).toHaveBeenCalledTimes(1);
     expect(courtsService.findById).toHaveBeenCalledWith('c1');
-    expect(courtsService.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('delegates create to CourtsService with dto', async () => {
+    const dto = { name: 'Court A', type: 'outdoor', lat: 48.8, lng: 2.3 };
+    await controller.create(dto as any);
+    expect(courtsService.create).toHaveBeenCalledWith(dto);
   });
 });

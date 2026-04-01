@@ -10,7 +10,7 @@ import { randomUUID } from 'crypto';
 import { EventFormat, TournamentSystem, VolleyType } from '../../common/enums';
 import { UpdateMatchManageDto } from './dto/update-match-manage.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Match, MatchStatus } from './match.entity';
 import { MatchParticipant } from './match-participant.entity';
 import { MatchChatMute } from './match-chat-mute.entity';
@@ -58,6 +58,7 @@ export class MatchesService {
     private readonly fixtureRepo: Repository<TournamentFixtureMatch>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    private readonly dataSource: DataSource,
     private readonly redisService: RedisService,
     private readonly notificationsService: NotificationsService,
     private readonly tournamentGenerator: TournamentGeneratorService,
@@ -107,7 +108,7 @@ export class MatchesService {
           'tournamentCourtCount is required for a tournament',
         );
       }
-      if (dto.tournamentCourtCount < 1 || dto.tournamentCourtCount > 16) {
+      if (dto.tournamentCourtCount < 1 || dto.tournamentCourtCount > 20) {
         throw new BadRequestException('Invalid tournamentCourtCount');
       }
       if (dto.tournamentSystem == null) {
@@ -325,43 +326,48 @@ export class MatchesService {
   }
 
   async join(matchId: string, userId: string): Promise<Match> {
-    const match = await this.findById(matchId);
+    const match = await this.dataSource.transaction(async (manager) => {
+      // Lock the match row to prevent race conditions
+      const [locked] = await manager.query(
+        `SELECT id, status, current_players, max_players
+         FROM matches WHERE id = $1 FOR UPDATE`,
+        [matchId],
+      ) as { id: string; status: string; current_players: number; max_players: number }[];
 
-    if (match.status === MatchStatus.CANCELLED) {
-      throw new BadRequestException('Match is cancelled');
-    }
+      if (!locked) throw new NotFoundException('Match not found');
 
-    if (match.status === MatchStatus.COMPLETED) {
-      throw new BadRequestException('Match is completed');
-    }
+      if (locked.status === 'cancelled') {
+        throw new BadRequestException('Match is cancelled');
+      }
+      if (locked.status === 'completed') {
+        throw new BadRequestException('Match is completed');
+      }
+      if (locked.current_players >= locked.max_players) {
+        throw new BadRequestException('Match is full');
+      }
 
-    if (match.status !== MatchStatus.OPEN && match.status !== MatchStatus.FULL) {
-      throw new BadRequestException('Match is not open');
-    }
+      const existing = await manager.findOne(MatchParticipant, {
+        where: { matchId, userId },
+      });
+      if (existing) {
+        throw new BadRequestException('Already joined this match');
+      }
 
-    if (match.status === MatchStatus.FULL || match.currentPlayers >= match.maxPlayers) {
-      throw new BadRequestException('Match is full');
-    }
+      await manager.insert(MatchParticipant, { matchId, userId });
 
-    const existing = await this.participantRepo.findOne({
-      where: { matchId, userId },
+      const newCount = locked.current_players + 1;
+      const newStatus =
+        newCount >= locked.max_players ? MatchStatus.FULL : MatchStatus.OPEN;
+
+      await manager.update(Match, matchId, {
+        currentPlayers: newCount,
+        status: newStatus,
+      });
+
+      return { currentPlayers: newCount, maxPlayers: locked.max_players };
     });
-    if (existing) {
-      throw new BadRequestException('Already joined this match');
-    }
 
-    await this.participantRepo.insert({ matchId, userId });
-
-    match.currentPlayers += 1;
-
-    if (match.currentPlayers >= match.maxPlayers) {
-      match.status = MatchStatus.FULL;
-    }
-
-    await this.matchRepo.update(matchId, {
-      currentPlayers: match.currentPlayers,
-      status: match.status,
-    });
+    const updatedMatch = await this.findById(matchId);
 
     await this.redisService.set(
       `match:${matchId}:count`,
@@ -370,16 +376,15 @@ export class MatchesService {
     );
 
     await this.invalidateNearbyCache();
+    await this.invalidateUserStats(userId);
 
-    // Notify creator
-    await this.notificationsService.notifyPlayerJoined(match, userId);
+    await this.notificationsService.notifyPlayerJoined(updatedMatch, userId);
 
-    // Notify all if almost full (>= 80%)
     if (match.currentPlayers / match.maxPlayers >= 0.8) {
-      await this.notificationsService.notifyMatchAlmostFull(match);
+      await this.notificationsService.notifyMatchAlmostFull(updatedMatch);
     }
 
-    return this.findById(matchId);
+    return updatedMatch;
   }
 
   async invitePlayer(
@@ -573,6 +578,7 @@ export class MatchesService {
     );
 
     await this.invalidateNearbyCache();
+    await this.invalidateUserStats(userId);
 
     return this.findById(matchId);
   }
@@ -601,6 +607,13 @@ export class MatchesService {
     winRate: number;
     streak: number;
   }> {
+    const statsCacheKey = `user:${userId}:stats:${eventFormat ?? 'all'}`;
+    const cached = await this.redisService.getJson<{
+      played: number; created: number; upcoming: number;
+      wins: number; losses: number; winRate: number; streak: number;
+    }>(statsCacheKey);
+    if (cached) return cached;
+
     const [row] = (await this.matchRepo.query(
       `
       WITH um AS (
@@ -723,7 +736,7 @@ export class MatchesService {
     const decided = wins + losses;
     const winRate = decided > 0 ? Math.round((wins / decided) * 100) : 0;
 
-    return {
+    const stats = {
       played: row?.played ?? 0,
       created: row?.created ?? 0,
       upcoming: row?.upcoming ?? 0,
@@ -732,6 +745,8 @@ export class MatchesService {
       winRate,
       streak,
     };
+    await this.redisService.setJson(statsCacheKey, stats, 3600); // 1 hour TTL
+    return stats;
   }
 
   async getMyMatches(userId: string): Promise<unknown[]> {
@@ -1338,71 +1353,61 @@ export class MatchesService {
       throw new ForbiddenException('You must join this match first');
     }
 
-    if (match.eventFormat === EventFormat.TOURNAMENT) {
-      const n = match.teamCount ?? 0;
-      const size = match.teamSize ?? 0;
-      if (n < 1 || size < 1) {
-        throw new BadRequestException('Invalid tournament configuration');
-      }
-      if (teamIndex !== null) {
-        if (!Number.isInteger(teamIndex) || teamIndex < 0 || teamIndex >= n) {
-          throw new BadRequestException('Invalid team index for this tournament');
+    await this.dataSource.transaction(async (manager) => {
+      // Lock participants for this match to prevent race conditions
+      await manager.query(
+        `SELECT id FROM match_participants WHERE match_id = $1 FOR UPDATE`,
+        [matchId],
+      );
+
+      // Re-read participants inside transaction
+      const participants = await manager.find(MatchParticipant, {
+        where: { matchId },
+      });
+
+      if (match.eventFormat === EventFormat.TOURNAMENT) {
+        const n = match.teamCount ?? 0;
+        const size = match.teamSize ?? 0;
+        if (n < 1 || size < 1) {
+          throw new BadRequestException('Invalid tournament configuration');
         }
-        let countOnTeam = 0;
-        for (const p of match.participants) {
-          if (p.userId === userId) {
-            continue;
+        if (teamIndex !== null) {
+          if (!Number.isInteger(teamIndex) || teamIndex < 0 || teamIndex >= n) {
+            throw new BadRequestException('Invalid team index for this tournament');
           }
-          if (p.teamIndex === teamIndex) {
-            countOnTeam += 1;
+          let countOnTeam = 0;
+          for (const p of participants) {
+            if (p.userId === userId) continue;
+            if (p.teamIndex === teamIndex) countOnTeam += 1;
+          }
+          if (countOnTeam >= size) {
+            throw new BadRequestException('This team is full');
           }
         }
-        if (countOnTeam >= size) {
-          throw new BadRequestException('This team is full');
+      } else {
+        if (teamIndex !== null && teamIndex !== 0 && teamIndex !== 1) {
+          throw new BadRequestException('teamIndex must be 0, 1, or null');
+        }
+        const slotsPerTeam = Math.floor(match.maxPlayers / 2);
+        if (slotsPerTeam < 1) {
+          throw new BadRequestException('Invalid match capacity');
+        }
+        if (teamIndex !== null) {
+          let count = 0;
+          for (const p of participants) {
+            if (p.userId === userId) continue;
+            if (p.teamIndex === teamIndex) count += 1;
+          }
+          if (count >= slotsPerTeam) {
+            throw new BadRequestException('This team is full');
+          }
         }
       }
-      participant.teamIndex = teamIndex;
-      await this.participantRepo.save(participant);
-      await this.invalidateNearbyCache();
-      return this.findById(matchId);
-    }
 
-    if (teamIndex !== null && teamIndex !== 0 && teamIndex !== 1) {
-      throw new BadRequestException('teamIndex must be 0, 1, or null');
-    }
+      await manager.update(MatchParticipant, { matchId, userId }, { teamIndex });
+    });
 
-    const slotsPerTeam = Math.floor(match.maxPlayers / 2);
-    if (slotsPerTeam < 1) {
-      throw new BadRequestException('Invalid match capacity');
-    }
-
-    let countA = 0;
-    let countB = 0;
-    for (const p of match.participants) {
-      if (p.userId === userId) {
-        continue;
-      }
-      if (p.teamIndex === 0) {
-        countA += 1;
-      } else if (p.teamIndex === 1) {
-        countB += 1;
-      }
-    }
-
-    if (teamIndex === 0) {
-      countA += 1;
-    } else if (teamIndex === 1) {
-      countB += 1;
-    }
-
-    if (countA > slotsPerTeam || countB > slotsPerTeam) {
-      throw new BadRequestException('This team is full');
-    }
-
-    participant.teamIndex = teamIndex;
-    await this.participantRepo.save(participant);
     await this.invalidateNearbyCache();
-
     return this.findById(matchId);
   }
 
@@ -1511,15 +1516,23 @@ export class MatchesService {
       throw new ForbiddenException('Only the organizer can delete this match');
     }
     await this.participantRepo.delete({ matchId });
-    await this.redisService.del(`match:${matchId}:count`);
     await this.matchRepo.delete(matchId);
-    await this.invalidateNearbyCache();
+    await this.invalidateMatchCaches(matchId);
   }
 
   private async invalidateNearbyCache(): Promise<void> {
-    const keys = await this.redisService.keys('nearby:matches:*');
-    if (keys.length > 0) {
-      await this.redisService.del(...keys);
+    await this.redisService.delPattern('nearby:matches:*');
+  }
+
+  private async invalidateUserStats(userId: string): Promise<void> {
+    await this.redisService.delPattern(`user:${userId}:stats:*`);
+  }
+
+  private async invalidateMatchCaches(matchId: string, participantUserIds?: string[]): Promise<void> {
+    await this.redisService.del(`match:${matchId}:count`);
+    await this.invalidateNearbyCache();
+    if (participantUserIds) {
+      await Promise.all(participantUserIds.map((uid) => this.invalidateUserStats(uid)));
     }
   }
 
@@ -1538,6 +1551,10 @@ export class MatchesService {
     }
     try {
       await this.ensureTournamentFixturesFromLegacy(match);
+
+      // Check incomplete teams once when event goes live
+      await this.checkIncompleteTeamsOnStart(match);
+
       const fixtures = await this.fixtureRepo.find({
         where: { eventMatchId: match.id },
         order: { round: 'ASC', order: 'ASC' },
@@ -1552,6 +1569,140 @@ export class MatchesService {
       // Keep match detail readable even if fixture storage is not yet available.
       Object.assign(match, { tournamentFixtures: [] });
     }
+  }
+
+  /**
+   * When a tournament event goes live, check if any teams are incomplete
+   * (0 players assigned). If so, delete all fixtures and regenerate the
+   * bracket with only the complete teams, re-indexed 0..n-1.
+   * Only runs once per tournament (flagged in Redis).
+   */
+  private async checkIncompleteTeamsOnStart(match: Match): Promise<void> {
+    if (
+      match.eventFormat !== EventFormat.TOURNAMENT ||
+      match.teamCount == null ||
+      match.teamSize == null ||
+      match.tournamentSystem == null
+    ) {
+      return;
+    }
+
+    const now = Date.now();
+    const startMs = new Date(match.scheduledAt).getTime();
+    if (
+      now < startMs ||
+      match.status === MatchStatus.COMPLETED ||
+      match.status === MatchStatus.CANCELLED
+    ) {
+      return;
+    }
+
+    const flagKey = `tournament:${match.id}:teams_checked`;
+    const alreadyChecked = await this.redisService.get(flagKey);
+    if (alreadyChecked) {
+      return;
+    }
+
+    // Count players per team
+    const teamPlayerCount = new Map<number, number>();
+    for (let i = 0; i < match.teamCount; i++) {
+      teamPlayerCount.set(i, 0);
+    }
+    for (const p of match.participants) {
+      if (
+        p.teamIndex != null &&
+        p.teamIndex >= 0 &&
+        p.teamIndex < match.teamCount
+      ) {
+        teamPlayerCount.set(
+          p.teamIndex,
+          (teamPlayerCount.get(p.teamIndex) ?? 0) + 1,
+        );
+      }
+    }
+
+    // Find complete teams (exactly teamSize players)
+    const completeTeams: number[] = [];
+    for (const [teamIdx, count] of teamPlayerCount) {
+      if (count >= match.teamSize) {
+        completeTeams.push(teamIdx);
+      }
+    }
+    completeTeams.sort((a, b) => a - b);
+
+    // Set flag (idempotent)
+    await this.redisService.set(flagKey, '1', 86400 * 7);
+
+    // If all teams are complete, nothing to do
+    if (completeTeams.length === match.teamCount) {
+      return;
+    }
+
+    // 0 or 1 complete team → tournament is over immediately
+    if (completeTeams.length < 2) {
+      // Delete all fixtures
+      await this.fixtureRepo.delete({ eventMatchId: match.id });
+
+      // Mark match completed
+      await this.matchRepo.update(match.id, {
+        status: MatchStatus.COMPLETED,
+        teamCount: completeTeams.length,
+        maxPlayers: completeTeams.length * (match.teamSize ?? 1),
+        tournamentGames: [] as unknown as Match['tournamentGames'],
+      });
+      match.status = MatchStatus.COMPLETED;
+      match.teamCount = completeTeams.length;
+      match.tournamentGames = [] as unknown as Match['tournamentGames'];
+      return;
+    }
+
+    // Build mapping: old team index → new team index (0-based compact)
+    const oldToNew = new Map<number, number>();
+    completeTeams.forEach((oldIdx, newIdx) => {
+      oldToNew.set(oldIdx, newIdx);
+    });
+
+    // Re-index participants to new team indices
+    for (const p of match.participants) {
+      if (p.teamIndex != null && oldToNew.has(p.teamIndex)) {
+        const newIdx = oldToNew.get(p.teamIndex)!;
+        if (p.teamIndex !== newIdx) {
+          p.teamIndex = newIdx;
+          await this.participantRepo.update(
+            { matchId: match.id, userId: p.userId },
+            { teamIndex: newIdx },
+          );
+        }
+      } else if (p.teamIndex != null) {
+        // Player was on an incomplete team — unassign
+        p.teamIndex = null;
+        await this.participantRepo.update(
+          { matchId: match.id, userId: p.userId },
+          { teamIndex: null },
+        );
+      }
+    }
+
+    // Delete old fixtures
+    await this.fixtureRepo.delete({ eventMatchId: match.id });
+
+    // Update match teamCount
+    const newTeamCount = completeTeams.length;
+    await this.matchRepo.update(match.id, {
+      teamCount: newTeamCount,
+      maxPlayers: newTeamCount * match.teamSize,
+    });
+    match.teamCount = newTeamCount;
+    match.maxPlayers = newTeamCount * match.teamSize;
+
+    // Regenerate bracket with new team count
+    await this.seedTournamentFixturesForNewMatch(
+      match.id,
+      match.tournamentSystem as TournamentSystem,
+      newTeamCount,
+      match.tournamentPointsPerMatch ?? 21,
+      match.tournamentCourtCount ?? 1,
+    );
   }
 
   private async seedTournamentFixturesForNewMatch(

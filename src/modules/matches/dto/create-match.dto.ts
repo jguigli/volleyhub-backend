@@ -41,7 +41,7 @@ export class CreateMatchDto {
 
   @IsOptional()
   @IsInt()
-  @Min(2)
+  @Min(3)
   @Max(32)
   teamCount?: number;
 

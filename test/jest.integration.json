@@ -3,7 +3,10 @@
   "rootDir": "..",
   "testEnvironment": "node",
   "transform": {
-    "^.+\\.(t|j)s$": "ts-jest"
+    "^.+\\.(t|j)s$": [
+      "ts-jest",
+      { "tsconfig": { "esModuleInterop": true } }
+    ]
   },
   "testMatch": ["<rootDir>/test/integration/**/*.spec.ts"]
 }

@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { CourtsModule } from './modules/courts/courts.module';
@@ -27,12 +29,18 @@ import databaseConfig from './config/database.config';
         logging: config.get<string>('app.nodeEnv') === 'development',
       }),
     }),
+    ThrottlerModule.forRoot([
+      { name: 'default', ttl: 60000, limit: 100 },
+    ]),
     RedisModule,
     AuthModule,
     UsersModule,
     CourtsModule,
     MatchesModule,
     NotificationsModule,
+  ],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}

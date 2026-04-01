@@ -23,7 +23,12 @@ interface JoinLeavePayload {
 }
 
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: {
+    origin: (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000')
+      .split(',')
+      .map((o) => o.trim()),
+    credentials: true,
+  },
   namespace: '/matches',
 })
 export class MatchesGateway

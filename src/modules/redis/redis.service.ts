@@ -44,11 +44,37 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client.keys(pattern);
   }
 
+  async getJson<T = unknown>(key: string): Promise<T | null> {
+    const raw = await this.client.get(key);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  async setJson(key: string, value: unknown, ttlSeconds?: number): Promise<void> {
+    const raw = JSON.stringify(value);
+    if (ttlSeconds) {
+      await this.client.set(key, raw, 'EX', ttlSeconds);
+    } else {
+      await this.client.set(key, raw);
+    }
+  }
+
   async incr(key: string): Promise<number> {
     return this.client.incr(key);
   }
 
   async decr(key: string): Promise<number> {
     return this.client.decr(key);
+  }
+
+  async delPattern(pattern: string): Promise<void> {
+    const keys = await this.client.keys(pattern);
+    if (keys.length > 0) {
+      await this.client.del(...keys);
+    }
   }
 }
