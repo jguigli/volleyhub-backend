@@ -73,7 +73,7 @@ export class CreateMatchDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(16)
+  @Max(20)
   tournamentCourtCount?: number;
 
   /** Tournoi : système de compétition (bracket, poules, round-robin). */

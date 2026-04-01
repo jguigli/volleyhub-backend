@@ -122,6 +122,27 @@ export class MatchesService {
       tournamentPointsPerMatch = dto.tournamentPointsPerMatch;
       tournamentCourtCount = dto.tournamentCourtCount;
       tournamentSystem = dto.tournamentSystem;
+
+      // Validate teamCount per system
+      if (tournamentSystem === TournamentSystem.ROUND_ROBIN) {
+        if (teamCount < 3 || teamCount > 6) {
+          throw new BadRequestException(
+            'Round robin requires 3 to 6 teams',
+          );
+        }
+      } else if (tournamentSystem === TournamentSystem.POOLS_FINALS) {
+        if (teamCount < 6 || teamCount > 16) {
+          throw new BadRequestException(
+            'Pools + finals requires 6 to 16 teams',
+          );
+        }
+      } else if (tournamentSystem === TournamentSystem.SINGLE_ELIMINATION) {
+        if (![4, 8, 16].includes(teamCount)) {
+          throw new BadRequestException(
+            'Single elimination requires 4, 8 or 16 teams',
+          );
+        }
+      }
       if (dto.volleyType === VolleyType.BEACH && teamSize > 4) {
         throw new BadRequestException(
           'Beach tournament: at most 4 players per team',

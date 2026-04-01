@@ -177,14 +177,24 @@ export class TournamentGeneratorService {
   }
 
   /**
-   * Deux poules en round-robin + une finale sans dépendances automatiques
-   * (classements à gérer ensuite / assignation manuelle des finalistes).
+   * Pools en round-robin + finale(s) en élimination.
+   * - ≤ 8 équipes → 2 pools
+   * - > 8 équipes → 4 pools
    */
   private poolsAndFinals(teamCount: number): FixtureRowInput[] {
     const rows: FixtureRowInput[] = [];
-    const half = Math.ceil(teamCount / 2);
-    const poolA = Array.from({ length: half }, (_, i) => i);
-    const poolB = Array.from({ length: teamCount - half }, (_, i) => i + half);
+
+    const poolCount = teamCount > 8 ? 4 : 2;
+    const poolLabels =
+      poolCount === 4
+        ? ['pool_a', 'pool_b', 'pool_c', 'pool_d']
+        : ['pool_a', 'pool_b'];
+
+    // Distribute teams across pools (round-robin distribution for balance)
+    const pools: number[][] = Array.from({ length: poolCount }, () => []);
+    for (let i = 0; i < teamCount; i++) {
+      pools[i % poolCount].push(i);
+    }
 
     const addPool = (indices: number[], phase: string) => {
       let order = 0;
@@ -210,25 +220,81 @@ export class TournamentGeneratorService {
       }
     };
 
-    addPool(poolA, 'pool_a');
-    addPool(poolB, 'pool_b');
+    for (let p = 0; p < poolCount; p++) {
+      addPool(pools[p], poolLabels[p]);
+    }
 
-    const finalId = randomUUID();
-    rows.push({
-      id: finalId,
-      teamAIndex: null,
-      teamBIndex: null,
-      scoreA: 0,
-      scoreB: 0,
-      courtIndex: null,
-      status: FixtureStatus.PENDING,
-      dependsOnFixtureIds: null,
-      feedsFixtureId: null,
-      feedsSlot: null,
-      round: 1,
-      order: 0,
-      phase: 'finals',
-    });
+    // Finals: one match (2 pools) or semi + final (4 pools)
+    if (poolCount === 2) {
+      rows.push({
+        id: randomUUID(),
+        teamAIndex: null,
+        teamBIndex: null,
+        scoreA: 0,
+        scoreB: 0,
+        courtIndex: null,
+        status: FixtureStatus.PENDING,
+        dependsOnFixtureIds: null,
+        feedsFixtureId: null,
+        feedsSlot: null,
+        round: 1,
+        order: 0,
+        phase: 'finals',
+      });
+    } else {
+      // 4 pools → 2 semis + 1 final
+      const semi1Id = randomUUID();
+      const semi2Id = randomUUID();
+      const finalId = randomUUID();
+
+      rows.push({
+        id: semi1Id,
+        teamAIndex: null,
+        teamBIndex: null,
+        scoreA: 0,
+        scoreB: 0,
+        courtIndex: null,
+        status: FixtureStatus.PENDING,
+        dependsOnFixtureIds: null,
+        feedsFixtureId: finalId,
+        feedsSlot: 'A',
+        round: 1,
+        order: 0,
+        phase: 'finals',
+      });
+
+      rows.push({
+        id: semi2Id,
+        teamAIndex: null,
+        teamBIndex: null,
+        scoreA: 0,
+        scoreB: 0,
+        courtIndex: null,
+        status: FixtureStatus.PENDING,
+        dependsOnFixtureIds: null,
+        feedsFixtureId: finalId,
+        feedsSlot: 'B',
+        round: 1,
+        order: 1,
+        phase: 'finals',
+      });
+
+      rows.push({
+        id: finalId,
+        teamAIndex: null,
+        teamBIndex: null,
+        scoreA: 0,
+        scoreB: 0,
+        courtIndex: null,
+        status: FixtureStatus.PENDING,
+        dependsOnFixtureIds: [semi1Id, semi2Id],
+        feedsFixtureId: null,
+        feedsSlot: null,
+        round: 2,
+        order: 0,
+        phase: 'finals',
+      });
+    }
 
     return rows;
   }
