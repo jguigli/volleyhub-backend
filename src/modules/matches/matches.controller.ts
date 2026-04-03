@@ -226,7 +226,7 @@ export class MatchesController {
     @CurrentUser() user: User,
     @Body() dto: UpdateMyTeamDto,
   ) {
-    return this.matchesService.setMyTeam(id, user.id, dto.teamIndex);
+    return this.matchesService.setMyTeam(id, user.id, dto.teamIndex, dto.slotIndex);
   }
 
   @Post(':id/renew')

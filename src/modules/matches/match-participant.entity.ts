@@ -29,6 +29,10 @@ export class MatchParticipant {
   @Column({ name: 'team_index', type: 'int', nullable: true })
   teamIndex: number | null;
 
+  /** Position dans l'équipe (0-based), null = non défini */
+  @Column({ name: 'slot_index', type: 'int', nullable: true })
+  slotIndex: number | null;
+
   @CreateDateColumn({ name: 'joined_at' })
   joinedAt: Date;
 }

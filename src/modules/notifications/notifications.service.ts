@@ -27,18 +27,21 @@ export class NotificationsService implements OnModuleInit {
       return;
     }
 
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        credential: admin.credential.cert({
-          projectId,
-          privateKey,
-          clientEmail,
-        }),
-      });
+    try {
+      if (!admin.apps.length) {
+        admin.initializeApp({
+          credential: admin.credential.cert({
+            projectId,
+            privateKey,
+            clientEmail,
+          }),
+        });
+      }
+      this.initialized = true;
+      this.logger.log('Firebase Admin SDK initialized');
+    } catch (err) {
+      this.logger.warn('Firebase init failed — push notifications disabled: ' + String(err));
     }
-
-    this.initialized = true;
-    this.logger.log('Firebase Admin SDK initialized');
   }
 
   async notifyPlayerJoined(match: Match, joiningUserId: string): Promise<void> {

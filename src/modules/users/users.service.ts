@@ -135,11 +135,13 @@ export class UsersService {
   }
 
   async unfollow(followerId: string, followingId: string): Promise<void> {
-    const follow = await this.followRepo.findOne({
-      where: { followerId, followingId },
-    });
-    if (follow) {
-      await this.followRepo.remove(follow);
+    const [forward, reverse] = await Promise.all([
+      this.followRepo.findOne({ where: { followerId, followingId } }),
+      this.followRepo.findOne({ where: { followerId: followingId, followingId: followerId } }),
+    ]);
+    const toRemove = [forward, reverse].filter((f): f is NonNullable<typeof f> => !!f);
+    if (toRemove.length > 0) {
+      await this.followRepo.remove(toRemove);
       await this.invalidateProfileCache(followerId);
       await this.invalidateProfileCache(followingId);
     }
@@ -178,7 +180,7 @@ export class UsersService {
     if (row) await this.followRequestRepo.remove(row);
   }
 
-  /** Le destinataire (`targetUserId`) accepte la demande de `requesterId`. */
+  /** Le destinataire (`targetUserId`) accepte la demande de `requesterId`. Crée une relation mutuelle. */
   async acceptFollowRequest(
     targetUserId: string,
     requesterId: string,
@@ -190,6 +192,7 @@ export class UsersService {
       throw new NotFoundException('No pending request');
     }
     await this.follow(requesterId, targetUserId);
+    await this.follow(targetUserId, requesterId);
     await this.followRequestRepo.remove(row);
   }
 

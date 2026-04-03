@@ -35,7 +35,7 @@ async function bootstrap() {
 
   const port = config.get<number>('app.port', 3000);
   await app.listen(port);
-  console.log(`VolleyFinder backend running on port ${port}`);
+  console.log(`VolleyHub backend running on port ${port}`);
 }
 
 bootstrap();

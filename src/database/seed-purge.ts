@@ -10,13 +10,13 @@ import { User } from '../modules/users/user.entity';
 dotenv.config();
 
 const SEED_TAG = '[SEED_FR]';
-const SEED_EMAIL_DOMAIN = 'seed.volleyfinder.local';
+const SEED_EMAIL_DOMAIN = 'seed.volleyhub.local';
 
 const dataSource = new DataSource({
   type: 'postgres',
   url:
     process.env.DATABASE_URL ??
-    'postgresql://volley:volley_secret@localhost:5432/volleyfinder',
+    'postgresql://volley:volley_secret@localhost:5432/volleyhub',
   entities: [Court, Match, MatchParticipant, TournamentFixtureMatch, User],
   synchronize: false,
 });

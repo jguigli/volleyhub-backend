@@ -26,7 +26,7 @@ import databaseConfig from './config/database.config';
         url: config.get<string>('database.url'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
         synchronize: config.get<string>('app.nodeEnv') !== 'production',
-        logging: config.get<string>('app.nodeEnv') === 'development',
+        logging: false,
       }),
     }),
     ThrottlerModule.forRoot([

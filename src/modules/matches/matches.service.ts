@@ -1344,6 +1344,7 @@ export class MatchesService {
     matchId: string,
     userId: string,
     teamIndex: number | null | undefined,
+    slotIndex?: number | null,
   ): Promise<Match> {
     if (teamIndex === undefined) {
       throw new BadRequestException(
@@ -1377,7 +1378,7 @@ export class MatchesService {
     await this.dataSource.transaction(async (manager) => {
       // Lock participants for this match to prevent race conditions
       await manager.query(
-        `SELECT id FROM match_participants WHERE match_id = $1 FOR UPDATE`,
+        `SELECT match_id, user_id FROM match_participants WHERE match_id = $1 FOR UPDATE`,
         [matchId],
       );
 
@@ -1425,7 +1426,10 @@ export class MatchesService {
         }
       }
 
-      await manager.update(MatchParticipant, { matchId, userId }, { teamIndex });
+      await manager.update(MatchParticipant, { matchId, userId }, {
+        teamIndex,
+        slotIndex: slotIndex ?? null,
+      });
     });
 
     await this.invalidateNearbyCache();
@@ -1594,9 +1598,10 @@ export class MatchesService {
 
   /**
    * When a tournament event goes live, check if any teams are incomplete
-   * (0 players assigned). If so, delete all fixtures and regenerate the
-   * bracket with only the complete teams, re-indexed 0..n-1.
-   * Only runs once per tournament (flagged in Redis).
+   * (fewer than teamSize players). If so, delete all fixtures and regenerate
+   * the bracket with only the complete teams, re-indexed 0..n-1.
+   * Runs once per tournament, tracked via a Redis flag.
+   * The flag is ONLY set after successfully processing — never before.
    */
   private async checkIncompleteTeamsOnStart(match: Match): Promise<void> {
     if (
@@ -1618,6 +1623,7 @@ export class MatchesService {
       return;
     }
 
+    // Only run once per tournament
     const flagKey = `tournament:${match.id}:teams_checked`;
     const alreadyChecked = await this.redisService.get(flagKey);
     if (alreadyChecked) {
@@ -1642,7 +1648,7 @@ export class MatchesService {
       }
     }
 
-    // Find complete teams (exactly teamSize players)
+    // Find complete teams (at least teamSize players)
     const completeTeams: number[] = [];
     for (const [teamIdx, count] of teamPlayerCount) {
       if (count >= match.teamSize) {
@@ -1651,20 +1657,16 @@ export class MatchesService {
     }
     completeTeams.sort((a, b) => a - b);
 
-    // Set flag (idempotent)
-    await this.redisService.set(flagKey, '1', 86400 * 7);
-
-    // If all teams are complete, nothing to do
+    // If all teams are complete, activate the bracket and return
     if (completeTeams.length === match.teamCount) {
+      await this.activateTournamentBracket(match);
+      await this.redisService.set(flagKey, '1', 86400 * 7);
       return;
     }
 
     // 0 or 1 complete team → tournament is over immediately
     if (completeTeams.length < 2) {
-      // Delete all fixtures
       await this.fixtureRepo.delete({ eventMatchId: match.id });
-
-      // Mark match completed
       await this.matchRepo.update(match.id, {
         status: MatchStatus.COMPLETED,
         teamCount: completeTeams.length,
@@ -1674,8 +1676,11 @@ export class MatchesService {
       match.status = MatchStatus.COMPLETED;
       match.teamCount = completeTeams.length;
       match.tournamentGames = [] as unknown as Match['tournamentGames'];
+      await this.redisService.set(flagKey, '1', 86400 * 7);
       return;
     }
+
+    // 2+ complete teams but not all — rebuild bracket
 
     // Build mapping: old team index → new team index (0-based compact)
     const oldToNew = new Map<number, number>();
@@ -1695,7 +1700,6 @@ export class MatchesService {
           );
         }
       } else if (p.teamIndex != null) {
-        // Player was on an incomplete team — unassign
         p.teamIndex = null;
         await this.participantRepo.update(
           { matchId: match.id, userId: p.userId },
@@ -1704,10 +1708,9 @@ export class MatchesService {
       }
     }
 
-    // Delete old fixtures
+    // Delete old fixtures and regenerate
     await this.fixtureRepo.delete({ eventMatchId: match.id });
 
-    // Update match teamCount
     const newTeamCount = completeTeams.length;
     await this.matchRepo.update(match.id, {
       teamCount: newTeamCount,
@@ -1716,7 +1719,6 @@ export class MatchesService {
     match.teamCount = newTeamCount;
     match.maxPlayers = newTeamCount * match.teamSize;
 
-    // Regenerate bracket with new team count
     await this.seedTournamentFixturesForNewMatch(
       match.id,
       match.tournamentSystem as TournamentSystem,
@@ -1724,14 +1726,18 @@ export class MatchesService {
       match.tournamentPointsPerMatch ?? 21,
       match.tournamentCourtCount ?? 1,
     );
+    await this.activateTournamentBracket(match);
+
+    // Set flag AFTER successful processing
+    await this.redisService.set(flagKey, '1', 86400 * 7);
   }
 
   private async seedTournamentFixturesForNewMatch(
     matchId: string,
     system: TournamentSystem,
     teamCount: number,
-    pointsPerMatch: number,
-    courtCount: number,
+    _pointsPerMatch?: number,
+    _courtCount?: number,
   ): Promise<void> {
     const rows = this.tournamentGenerator.generateRows(system, teamCount);
     if (rows.length === 0) {
@@ -1744,8 +1750,15 @@ export class MatchesService {
       }),
     );
     await this.fixtureRepo.save(entities);
-    await this.tournamentEngine.run(matchId, pointsPerMatch, courtCount);
     await this.persistTournamentGamesJson(matchId);
+  }
+
+  /** Activate the bracket: run engine to assign courts and start LIVE matches. */
+  private async activateTournamentBracket(match: Match): Promise<void> {
+    const pts = match.tournamentPointsPerMatch ?? 21;
+    const courts = match.tournamentCourtCount ?? 1;
+    await this.tournamentEngine.run(match.id, pts, courts);
+    await this.persistTournamentGamesJson(match.id);
   }
 
   private async persistTournamentGamesJson(matchId: string): Promise<void> {
