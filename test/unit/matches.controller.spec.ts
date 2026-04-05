@@ -243,7 +243,7 @@ describe('MatchesController (unit)', () => {
 
       await controller.setMyTeam('m-1', fakeUser as any, dto as any);
 
-      expect(matchesService.setMyTeam).toHaveBeenCalledWith('m-1', 'user-1', 1);
+      expect(matchesService.setMyTeam).toHaveBeenCalledWith('m-1', 'user-1', 1, undefined);
     });
   });
 

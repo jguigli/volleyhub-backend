@@ -306,7 +306,7 @@ describe('Matches routes (integration)', () => {
       .send({ teamIndex: 0 })
       .expect(200);
 
-    expect(matchesService.setMyTeam).toHaveBeenCalledWith('m1', 'u-auth', 0);
+    expect(matchesService.setMyTeam).toHaveBeenCalledWith('m1', 'u-auth', 0, undefined);
   });
 
   it('PATCH /matches/:id/my-team -> 200 (auth), body { teamIndex: null } (unassign)', async () => {
@@ -315,7 +315,7 @@ describe('Matches routes (integration)', () => {
       .send({ teamIndex: null })
       .expect(200);
 
-    expect(matchesService.setMyTeam).toHaveBeenCalledWith('m1', 'u-auth', null);
+    expect(matchesService.setMyTeam).toHaveBeenCalledWith('m1', 'u-auth', null, undefined);
   });
 
   // ─── DELETE routes ────────────────────────────────────────────────────
