@@ -1,8 +1,10 @@
 import {
   IsArray,
+  IsIn,
   IsInt,
   IsObject,
   IsOptional,
+  IsString,
   IsUUID,
   Max,
   Min,
@@ -87,4 +89,67 @@ export class UpdateMatchManageDto {
   @ValidateNested({ each: true })
   @Type(() => TournamentGameDto)
   tournamentGames?: TournamentGameDto[] | null;
+
+  // --- Tournament settings (only when event is upcoming) ---
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(999)
+  tournamentPointsPerMatch?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  tournamentCourtCount?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['single_elimination', 'pools_finals', 'round_robin'])
+  tournamentSystem?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  @Max(32)
+  teamCount?: number;
+
+  /** List of team indices to remove when reducing teamCount */
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  removedTeamIndices?: number[];
+
+  // --- Volley type (both match and tournament, only when upcoming) ---
+
+  @IsOptional()
+  @IsString()
+  @IsIn(["classic", "beach", "green"])
+  volleyType?: string;
+
+  // --- Match settings (only when event is upcoming) ---
+
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  @Max(96)
+  maxPlayers?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(9)
+  matchSets?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(999)
+  pointsToWin?: number;
+
+  // --- Early start ---
+
+  @IsOptional()
+  startNow?: boolean;
 }

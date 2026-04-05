@@ -8,6 +8,7 @@ import { UsersModule } from './modules/users/users.module';
 import { CourtsModule } from './modules/courts/courts.module';
 import { MatchesModule } from './modules/matches/matches.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { ScheduleModule } from '@nestjs/schedule';
 import { RedisModule } from './modules/redis/redis.module';
 import appConfig from './config/app.config';
 import databaseConfig from './config/database.config';
@@ -32,6 +33,7 @@ import databaseConfig from './config/database.config';
     ThrottlerModule.forRoot([
       { name: 'default', ttl: 60000, limit: 100 },
     ]),
+    ScheduleModule.forRoot(),
     RedisModule,
     AuthModule,
     UsersModule,

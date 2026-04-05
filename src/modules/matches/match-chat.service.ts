@@ -12,6 +12,7 @@ import { MatchChatMessage } from './match-chat-message.entity';
 import { MatchChatMute } from './match-chat-mute.entity';
 import { MatchesService } from './matches.service';
 import { MatchesGateway } from './matches.gateway';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const CHAT_PAGE = 50;
 
@@ -25,6 +26,7 @@ export class MatchChatService {
     private readonly matchesService: MatchesService,
     @Inject(forwardRef(() => MatchesGateway))
     private readonly matchesGateway: MatchesGateway,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async assertParticipant(matchId: string, userId: string): Promise<void> {
@@ -121,6 +123,14 @@ export class MatchChatService {
     };
 
     this.matchesGateway.broadcastChatMessage(matchId, payload);
+
+    // Push notification to other participants (fire-and-forget)
+    void this.notificationsService.notifyChatMessage(
+      matchId,
+      userId,
+      payload.user.username,
+    );
+
     return payload;
   }
 

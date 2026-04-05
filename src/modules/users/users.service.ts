@@ -10,6 +10,7 @@ import { Follow } from './follow.entity';
 import { FollowRequest } from './follow-request.entity';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { RedisService } from '../redis/redis.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export interface PublicProfile {
   id: string;
@@ -42,6 +43,7 @@ export class UsersService {
     @InjectRepository(FollowRequest)
     private readonly followRequestRepo: Repository<FollowRequest>,
     private readonly redisService: RedisService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private profileCacheKey(userId: string): string {
@@ -70,10 +72,17 @@ export class UsersService {
       const user = await this.userRepo.findOne({ where: { id } });
       if (!user) throw new NotFoundException('User not found');
 
-      const [followersCount, followingCount] = await Promise.all([
-        this.followRepo.count({ where: { followingId: id } }),
-        this.followRepo.count({ where: { followerId: id } }),
+      // Count unique connected users (union of followers and following)
+      const [followers, following] = await Promise.all([
+        this.followRepo.find({ where: { followingId: id }, select: ['followerId'] }),
+        this.followRepo.find({ where: { followerId: id }, select: ['followingId'] }),
       ]);
+      const uniqueConnections = new Set([
+        ...followers.map((f) => f.followerId),
+        ...following.map((f) => f.followingId),
+      ]);
+      const followersCount = uniqueConnections.size;
+      const followingCount = 0; // not used separately anymore
 
       base = {
         id: user.id,
@@ -194,6 +203,13 @@ export class UsersService {
     await this.follow(requesterId, targetUserId);
     await this.follow(targetUserId, requesterId);
     await this.followRequestRepo.remove(row);
+
+    const accepter = await this.userRepo.findOne({ where: { id: targetUserId } });
+    this.notificationsService.notifyConnectionAccepted(
+      targetUserId,
+      accepter?.username ?? 'Someone',
+      requesterId,
+    ).catch(() => {});
   }
 
   async declineFollowRequest(

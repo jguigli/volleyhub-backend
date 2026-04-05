@@ -6,11 +6,13 @@ import { User } from './user.entity';
 import { Follow } from './follow.entity';
 import { FollowRequest } from './follow-request.entity';
 import { AuthModule } from '../auth/auth.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, Follow, FollowRequest]),
     AuthModule,
+    NotificationsModule,
   ],
   controllers: [UsersController],
   providers: [UsersService],

@@ -249,6 +249,23 @@ export class MatchesService {
     if (!match) {
       throw new NotFoundException('Match not found');
     }
+
+    // Auto-cancel match events when going live with an empty team
+    if (
+      match.eventFormat === EventFormat.MATCH &&
+      match.status !== MatchStatus.COMPLETED &&
+      match.status !== MatchStatus.CANCELLED &&
+      new Date(match.scheduledAt).getTime() <= Date.now()
+    ) {
+      const teamA = match.participants.filter((p) => p.teamIndex === 0);
+      const teamB = match.participants.filter((p) => p.teamIndex === 1);
+      if (teamA.length === 0 || teamB.length === 0) {
+        await this.matchRepo.update(id, { status: MatchStatus.COMPLETED });
+        match.status = MatchStatus.COMPLETED;
+        this.notificationsService.notifyEventCompleted(match).catch(() => {});
+      }
+    }
+
     await this.attachCourtLatLng(match);
     await this.attachTournamentData(match);
     return match;
@@ -404,6 +421,18 @@ export class MatchesService {
     if (match.currentPlayers / match.maxPlayers >= 0.8) {
       await this.notificationsService.notifyMatchAlmostFull(updatedMatch);
     }
+
+    if (updatedMatch.status === MatchStatus.FULL) {
+      this.notificationsService.notifyEventFull(updatedMatch).catch(() => {});
+    }
+
+    this.matchesGateway.broadcastMatchUpdate(matchId, {
+      matchId,
+      currentPlayers: updatedMatch.currentPlayers,
+      maxPlayers: updatedMatch.maxPlayers,
+      status: updatedMatch.status,
+      courtId: updatedMatch.courtId,
+    });
 
     return updatedMatch;
   }
@@ -600,6 +629,17 @@ export class MatchesService {
 
     await this.invalidateNearbyCache();
     await this.invalidateUserStats(userId);
+
+    const leaver = await this.userRepo.findOne({ where: { id: userId } });
+    this.notificationsService.notifyPlayerLeftEvent(match, userId, leaver?.username ?? 'A player').catch(() => {});
+
+    this.matchesGateway.broadcastMatchUpdate(matchId, {
+      matchId,
+      currentPlayers: nextCount,
+      maxPlayers: match.maxPlayers,
+      status: match.status,
+      courtId: match.courtId,
+    });
 
     return this.findById(matchId);
   }
@@ -829,6 +869,137 @@ export class MatchesService {
     }
     if (match.status === MatchStatus.CANCELLED) {
       throw new BadRequestException('Match is cancelled');
+    }
+
+    // --- Tournament settings update (only when upcoming) ---
+    if (
+      match.eventFormat === EventFormat.TOURNAMENT &&
+      (dto.tournamentPointsPerMatch != null ||
+        dto.tournamentCourtCount != null ||
+        dto.tournamentSystem != null ||
+        dto.teamCount != null ||
+        dto.volleyType != null)
+    ) {
+      const isLive =
+        match.status !== MatchStatus.COMPLETED &&
+        new Date(match.scheduledAt).getTime() <= Date.now();
+      if (isLive || match.status === MatchStatus.COMPLETED) {
+        throw new BadRequestException(
+          'Tournament settings can only be changed before the event starts',
+        );
+      }
+
+      const updates: Partial<Match> = {};
+      if (dto.volleyType != null) {
+        updates.volleyType = dto.volleyType as any;
+      }
+      if (dto.tournamentPointsPerMatch != null) {
+        updates.tournamentPointsPerMatch = dto.tournamentPointsPerMatch;
+      }
+      if (dto.tournamentCourtCount != null) {
+        updates.tournamentCourtCount = dto.tournamentCourtCount;
+      }
+      if (dto.tournamentSystem != null) {
+        updates.tournamentSystem = dto.tournamentSystem as any;
+      }
+
+      if (dto.teamCount != null && dto.teamCount !== match.teamCount) {
+        const oldCount = match.teamCount ?? 0;
+        const newCount = dto.teamCount;
+        updates.teamCount = newCount;
+        updates.maxPlayers = newCount * (match.teamSize ?? 1);
+
+        if (newCount < oldCount) {
+          // Unassign players from removed teams
+          const removedIndices = dto.removedTeamIndices ?? [];
+          if (removedIndices.length > 0) {
+            for (const p of match.participants) {
+              if (p.teamIndex != null && removedIndices.includes(p.teamIndex)) {
+                await this.participantRepo.update(
+                  { matchId, userId: p.userId },
+                  { teamIndex: null, slotIndex: null },
+                );
+              }
+            }
+          }
+          // Also unassign anyone with teamIndex >= newCount
+          for (const p of match.participants) {
+            if (p.teamIndex != null && p.teamIndex >= newCount) {
+              await this.participantRepo.update(
+                { matchId, userId: p.userId },
+                { teamIndex: null, slotIndex: null },
+              );
+            }
+          }
+        }
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await this.matchRepo.update(matchId, updates);
+      }
+
+      // Regenerate tournament bracket
+      await this.regenerateTournamentBracket(matchId);
+
+      await this.invalidateNearbyCache();
+      const updatedTournament = await this.findById(matchId);
+      this.notificationsService.notifyEventSettingsChanged(updatedTournament, match.creator?.username ?? 'Organizer').catch(() => {});
+      return updatedTournament;
+    }
+
+    // --- Match settings update (only when upcoming) ---
+    if (
+      match.eventFormat === EventFormat.MATCH &&
+      (dto.maxPlayers != null || dto.matchSets != null || dto.pointsToWin != null || dto.volleyType != null)
+    ) {
+      const isLive =
+        match.status !== MatchStatus.COMPLETED &&
+        new Date(match.scheduledAt).getTime() <= Date.now();
+      if (isLive || match.status === MatchStatus.COMPLETED) {
+        throw new BadRequestException(
+          'Match settings can only be changed before the event starts',
+        );
+      }
+
+      const updates: Partial<Match> = {};
+      if (dto.volleyType != null) {
+        updates.volleyType = dto.volleyType as any;
+      }
+      if (dto.maxPlayers != null) {
+        updates.maxPlayers = dto.maxPlayers;
+      }
+      if (dto.matchSets != null) {
+        updates.matchSets = dto.matchSets;
+      }
+      if (dto.pointsToWin != null) {
+        updates.pointsToWin = dto.pointsToWin;
+      }
+      if (Object.keys(updates).length > 0) {
+        await this.matchRepo.update(matchId, updates);
+      }
+      await this.invalidateNearbyCache();
+      const updatedMatch = await this.findById(matchId);
+      this.notificationsService.notifyEventSettingsChanged(updatedMatch, match.creator?.username ?? 'Organizer').catch(() => {});
+      return updatedMatch;
+    }
+
+    // --- Early start ---
+    if (dto.startNow === true) {
+      if (new Date(match.scheduledAt).getTime() <= Date.now()) {
+        throw new BadRequestException('Event is already live');
+      }
+      await this.matchRepo.update(matchId, {
+        scheduledAt: new Date(),
+      });
+      // For tournaments, activate the bracket
+      if (match.eventFormat === EventFormat.TOURNAMENT) {
+        const updatedMatch = await this.findById(matchId);
+        await this.activateTournamentBracket(updatedMatch);
+      }
+      await this.invalidateNearbyCache();
+      const startedMatch = await this.findById(matchId);
+      this.notificationsService.notifyEventStartedEarly(startedMatch, match.creator?.username ?? 'Organizer').catch(() => {});
+      return startedMatch;
     }
 
     if (dto.teamAssignments != null) {
@@ -1219,6 +1390,14 @@ export class MatchesService {
       fixture.scoreBConfirmed = true;
     }
     await this.fixtureRepo.save(fixture);
+
+    // Notify opponent that this side locked
+    if (side === 'A' && fixture.teamBIndex != null && fixture.teamBIndex >= 0) {
+      this.notificationsService.notifyOpponentScoreLocked(match.id, fixture.teamAIndex ?? 0, fixture.teamBIndex).catch(() => {});
+    } else if (side === 'B' && fixture.teamAIndex != null && fixture.teamAIndex >= 0) {
+      this.notificationsService.notifyOpponentScoreLocked(match.id, fixture.teamBIndex ?? 0, fixture.teamAIndex).catch(() => {});
+    }
+
     const fresh = await this.fixtureRepo.findOneOrFail({
       where: { id: fixtureId },
     });
@@ -1247,6 +1426,9 @@ export class MatchesService {
         ? MatchStatus.COMPLETED
         : this.statusByCapacity(matchToSave);
       await this.matchRepo.save(matchToSave);
+      if (allFinished) {
+        this.notificationsService.notifyEventCompleted(matchToSave).catch(() => {});
+      }
     } else {
       await this.persistTournamentGamesJson(fixture.eventMatchId);
     }
@@ -1292,6 +1474,14 @@ export class MatchesService {
     await this.fixtureRepo.save(fixture);
     await this.persistTournamentGamesJson(fixture.eventMatchId);
     await this.emitTournamentSocket(fixture.eventMatchId);
+
+    this.notificationsService.notifyScoreOverridden(
+      fixture.eventMatchId,
+      fixture.teamAIndex ?? 0,
+      fixture.teamBIndex ?? 0,
+      match.creator?.username ?? 'Organizer',
+    ).catch(() => {});
+
     return this.fixtureRepo.findOneOrFail({ where: { id: fixtureId } });
   }
 
@@ -1334,6 +1524,7 @@ export class MatchesService {
       NEARBY_MATCHES_TTL * 60,
     );
     await this.invalidateNearbyCache();
+    this.notificationsService.notifyPlayerRemoved(matchId, targetUserId, match.creator?.username ?? 'Organizer').catch(() => {});
     return this.findById(matchId);
   }
 
@@ -1433,7 +1624,17 @@ export class MatchesService {
     });
 
     await this.invalidateNearbyCache();
-    return this.findById(matchId);
+
+    const updated = await this.findById(matchId);
+    this.matchesGateway.broadcastMatchUpdate(matchId, {
+      matchId,
+      currentPlayers: updated.currentPlayers,
+      maxPlayers: updated.maxPlayers,
+      status: updated.status,
+      courtId: updated.courtId,
+    });
+
+    return updated;
   }
 
   /**
@@ -1501,6 +1702,7 @@ export class MatchesService {
         matchId: newMatch.id,
         userId: p.userId,
         teamIndex: p.teamIndex,
+        slotIndex: p.slotIndex ?? null,
       });
       currentPlayers += 1;
     }
@@ -1533,13 +1735,24 @@ export class MatchesService {
   }
 
   async deleteMatch(matchId: string, userId: string): Promise<void> {
-    const match = await this.matchRepo.findOne({ where: { id: matchId } });
+    const match = await this.matchRepo.findOne({
+      where: { id: matchId },
+      relations: ['creator', 'participants'],
+    });
     if (!match) {
       throw new NotFoundException('Match not found');
     }
     if (match.creatorId !== userId) {
       throw new ForbiddenException('Only the organizer can delete this match');
     }
+    // Notify participants BEFORE deletion
+    const participantIds = match.participants
+      .map((p) => p.userId)
+      .filter((id) => id !== userId);
+    this.notificationsService.notifyEventDeleted(
+      matchId, participantIds, match.creator?.username ?? 'Organizer',
+    ).catch(() => {});
+
     await this.participantRepo.delete({ matchId });
     await this.matchRepo.delete(matchId);
     await this.invalidateMatchCaches(matchId);
@@ -1789,6 +2002,23 @@ export class MatchesService {
       status: f.status,
       phase: f.phase,
     })) as NonNullable<Match['tournamentGames']>;
+  }
+
+  private async regenerateTournamentBracket(matchId: string): Promise<void> {
+    const match = await this.findById(matchId);
+    if (match.eventFormat !== EventFormat.TOURNAMENT) return;
+
+    // Delete all existing fixtures
+    await this.fixtureRepo.delete({ eventMatchId: matchId });
+
+    // Regenerate with current settings
+    await this.seedTournamentFixturesForNewMatch(
+      matchId,
+      match.tournamentSystem ?? TournamentSystem.SINGLE_ELIMINATION,
+      match.teamCount ?? 4,
+      match.tournamentPointsPerMatch ?? 21,
+      match.tournamentCourtCount ?? 1,
+    );
   }
 
   private async ensureTournamentFixturesFromLegacy(match: Match): Promise<void> {

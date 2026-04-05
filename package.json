@@ -17,7 +17,10 @@
     "test:unit": "jest --config test/jest.unit.json",
     "test:integration": "jest --config test/jest.integration.json",
     "seed": "ts-node src/database/seed.ts",
-    "seed:purge": "ts-node src/database/seed-purge.ts"
+    "seed:purge": "ts-node src/database/seed-purge.ts",
+    "seed:notif-social": "ts-node src/database/seed-notif-social.ts",
+    "seed:notif-events": "ts-node src/database/seed-notif-events.ts",
+    "seed:notif-purge": "ts-node src/database/seed-notifications-purge.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.3.0",
@@ -27,6 +30,7 @@
     "@nestjs/passport": "^10.0.3",
     "@nestjs/platform-express": "^10.3.0",
     "@nestjs/platform-socket.io": "^10.3.0",
+    "@nestjs/schedule": "^6.1.1",
     "@nestjs/throttler": "^6.5.0",
     "@nestjs/typeorm": "^10.0.1",
     "@nestjs/websockets": "^10.3.0",

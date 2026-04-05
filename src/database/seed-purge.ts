@@ -41,9 +41,58 @@ async function purgeSeed(): Promise<void> {
     [`${SEED_TAG}%`],
   );
 
+  // Also clean up matches created by seed notification scripts
+  await dataSource.query(
+    `DELETE FROM tournament_fixtures tf
+     USING matches m
+     WHERE tf.event_match_id = m.id
+       AND (m.description LIKE $1 OR m.description LIKE $2)`,
+    [`${SEED_TAG}%`, '[SEED]%'],
+  );
+  await dataSource.query(
+    `DELETE FROM match_participants mp
+     USING matches m
+     WHERE mp.match_id = m.id
+       AND m.description LIKE $1`,
+    ['[SEED]%'],
+  );
+  // Delete matches created by seeded users
+  await dataSource.query(
+    `DELETE FROM tournament_fixtures tf
+     USING matches m, users u
+     WHERE tf.event_match_id = m.id
+       AND m.creator_id = u.id
+       AND u.email LIKE $1`,
+    [`%@${SEED_EMAIL_DOMAIN}`],
+  );
+  await dataSource.query(
+    `DELETE FROM match_participants mp
+     USING matches m, users u
+     WHERE mp.match_id = m.id
+       AND m.creator_id = u.id
+       AND u.email LIKE $1`,
+    [`%@${SEED_EMAIL_DOMAIN}`],
+  );
+  await dataSource.query(
+    `DELETE FROM matches WHERE creator_id IN (SELECT id FROM users WHERE email LIKE $1)`,
+    [`%@${SEED_EMAIL_DOMAIN}`],
+  );
+
   await dataSource.query(`DELETE FROM matches WHERE description LIKE $1`, [
     `${SEED_TAG}%`,
   ]);
+  await dataSource.query(`DELETE FROM matches WHERE description LIKE $1`, [
+    '[SEED]%',
+  ]);
+  // Clean follows/requests involving seeded users
+  await dataSource.query(
+    `DELETE FROM follows WHERE follower_id IN (SELECT id FROM users WHERE email LIKE $1) OR following_id IN (SELECT id FROM users WHERE email LIKE $1)`,
+    [`%@${SEED_EMAIL_DOMAIN}`],
+  );
+  await dataSource.query(
+    `DELETE FROM follow_requests WHERE requester_id IN (SELECT id FROM users WHERE email LIKE $1) OR target_id IN (SELECT id FROM users WHERE email LIKE $1)`,
+    [`%@${SEED_EMAIL_DOMAIN}`],
+  );
   await dataSource.query(`DELETE FROM courts WHERE name LIKE $1`, [`${SEED_TAG}%`]);
   await dataSource.query(`DELETE FROM users WHERE email LIKE $1`, [
     `%@${SEED_EMAIL_DOMAIN}`,
