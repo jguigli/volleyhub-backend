@@ -1,6 +1,7 @@
 import {
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -80,6 +81,10 @@ export class CreateMatchDto {
   @IsOptional()
   @IsEnum(TournamentSystem)
   tournamentSystem?: TournamentSystem;
+
+  @IsOptional()
+  @IsIn(['point_sec', 'two_point_gap'])
+  scoringRule?: 'point_sec' | 'two_point_gap';
 
   @IsString()
   @IsNotEmpty()

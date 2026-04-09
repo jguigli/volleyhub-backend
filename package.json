@@ -20,7 +20,9 @@
     "seed:purge": "ts-node src/database/seed-purge.ts",
     "seed:notif-social": "ts-node src/database/seed-notif-social.ts",
     "seed:notif-events": "ts-node src/database/seed-notif-events.ts",
-    "seed:notif-purge": "ts-node src/database/seed-notifications-purge.ts"
+    "seed:notif-purge": "ts-node src/database/seed-notifications-purge.ts",
+    "seed:live-match": "ts-node src/database/seed-live-match.ts",
+    "seed:france": "ts-node src/database/seed-live-match-2.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.3.0",

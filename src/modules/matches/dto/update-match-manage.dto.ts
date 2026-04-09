@@ -148,6 +148,10 @@ export class UpdateMatchManageDto {
   @Max(999)
   pointsToWin?: number;
 
+  @IsOptional()
+  @IsIn(['point_sec', 'two_point_gap'])
+  scoringRule?: 'point_sec' | 'two_point_gap';
+
   // --- Early start ---
 
   @IsOptional()

@@ -189,6 +189,7 @@ export class MatchesService {
       teamSize,
       matchSets,
       pointsToWin,
+      scoringRule: format === EventFormat.MATCH ? (dto.scoringRule ?? 'point_sec') : null,
       tournamentPointsPerMatch,
       tournamentCourtCount,
       tournamentSystem,
@@ -307,6 +308,7 @@ export class MatchesService {
              m.event_format AS event_format,
              m.match_sets AS match_sets,
              m.points_to_win AS points_to_win,
+             m.scoring_rule AS scoring_rule,
              m.tournament_points_per_match AS tournament_points_per_match,
              c.id AS court_id, c.name AS court_name, c.type AS court_type,
              c.address AS court_address,
@@ -824,6 +826,7 @@ export class MatchesService {
              m.event_format AS event_format,
              m.match_sets AS match_sets,
              m.points_to_win AS points_to_win,
+             m.scoring_rule AS scoring_rule,
              m.tournament_points_per_match AS tournament_points_per_match,
              m.creator_id,
              u.username AS creator_username,
@@ -974,6 +977,9 @@ export class MatchesService {
       if (dto.pointsToWin != null) {
         updates.pointsToWin = dto.pointsToWin;
       }
+      if (dto.scoringRule != null) {
+        updates.scoringRule = dto.scoringRule;
+      }
       if (Object.keys(updates).length > 0) {
         await this.matchRepo.update(matchId, updates);
       }
@@ -1093,6 +1099,7 @@ export class MatchesService {
             `Too many sets provided: maximum is ${totalSets}`,
           );
         }
+        const rule = match.scoringRule ?? 'point_sec';
         let winsA = 0;
         let winsB = 0;
         for (const s of normalized) {
@@ -1102,13 +1109,34 @@ export class MatchesService {
             !Number.isInteger(s.teamA) ||
             !Number.isInteger(s.teamB) ||
             s.teamA < 0 ||
-            s.teamB < 0 ||
-            s.teamA > maxSetPoints ||
-            s.teamB > maxSetPoints
+            s.teamB < 0
           ) {
             throw new BadRequestException(
-              `Set scores must be integers between 0 and ${maxSetPoints}`,
+              `Set scores must be non-negative integers`,
             );
+          }
+          if (s.teamA === s.teamB) {
+            throw new BadRequestException('A set cannot end in a tie');
+          }
+          const hi = Math.max(s.teamA, s.teamB);
+          const lo = Math.min(s.teamA, s.teamB);
+          if (rule === 'two_point_gap') {
+            const valid =
+              hi >= maxSetPoints &&
+              hi - lo === 2 &&
+              (hi === maxSetPoints ? lo <= maxSetPoints - 2 : true);
+            if (!valid) {
+              throw new BadRequestException(
+                `In 2-point gap mode, the winner must have at least ${maxSetPoints} points and exactly a 2-point lead`,
+              );
+            }
+          } else {
+            // point_sec: winner must have exactly pointsToWin, loser < pointsToWin
+            if (hi !== maxSetPoints || lo >= maxSetPoints) {
+              throw new BadRequestException(
+                `In sudden death mode, the winner must have exactly ${maxSetPoints} points`,
+              );
+            }
           }
           if (s.teamA > s.teamB) winsA += 1;
           if (s.teamB > s.teamA) winsB += 1;
@@ -1260,6 +1288,9 @@ export class MatchesService {
 
     if (needsMatchSave) {
       await this.matchRepo.save(match);
+      // Invalidate stats cache for all participants when match status changes
+      const participantIds = match.participants.map((p) => p.userId);
+      await Promise.all(participantIds.map((uid) => this.invalidateUserStats(uid)));
     }
 
     return this.findById(matchId);
@@ -1688,6 +1719,10 @@ export class MatchesService {
       tournamentSystem:
         source.eventFormat === EventFormat.TOURNAMENT
           ? source.tournamentSystem ?? undefined
+          : undefined,
+      scoringRule:
+        source.eventFormat === EventFormat.MATCH
+          ? (source.scoringRule as any) ?? undefined
           : undefined,
       description: source.description ?? undefined,
     } as CreateMatchDto;

@@ -92,6 +92,10 @@ export class Match {
   @Column({ name: 'points_to_win', type: 'int', nullable: true })
   pointsToWin: number | null;
 
+  /** Simple match: scoring rule. 'point_sec' = first to reach points wins. 'two_point_gap' = must win by 2. */
+  @Column({ name: 'scoring_rule', type: 'varchar', nullable: true, default: 'point_sec' })
+  scoringRule: 'point_sec' | 'two_point_gap' | null;
+
   /** Tournament: points to win each bracket match. Null for simple matches. */
   @Column({ name: 'tournament_points_per_match', type: 'int', nullable: true })
   tournamentPointsPerMatch: number | null;
