@@ -1,0 +1,21 @@
+version: '3.9'
+
+# This file is loaded automatically by docker-compose in development.
+# It overrides the backend service to enable hot-reload with source volume mounts.
+# Production: docker-compose -f docker-compose.yml up
+# Development: docker-compose up  (picks up this override automatically)
+#
+# Anonymous volume /app/node_modules persists deps in the container. After
+# package.json or lockfile changes on the host, we run npm install on start
+# so modules match (e.g. bcrypt → bcryptjs).
+
+services:
+  backend:
+    build:
+      target: builder
+    command: sh -c "npm install && npm run build && npm run start:dev"
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ./apps/backend:/app
+      - /app/node_modules
