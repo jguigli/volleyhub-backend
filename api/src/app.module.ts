@@ -22,13 +22,18 @@ import databaseConfig from './config/database.config';
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        type: 'postgres',
-        url: config.get<string>('database.url'),
-        entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        synchronize: config.get<string>('app.nodeEnv') !== 'production',
-        logging: false,
-      }),
+      useFactory: (config: ConfigService) => {
+        const isProd = config.get<string>('app.nodeEnv') === 'production';
+        return {
+          type: 'postgres',
+          url: config.get<string>('database.url'),
+          entities: [__dirname + '/**/*.entity{.ts,.js}'],
+          migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
+          synchronize: !isProd,
+          migrationsRun: isProd,
+          logging: false,
+        };
+      },
     }),
     ThrottlerModule.forRoot([
       { name: 'default', ttl: 60000, limit: 100 },

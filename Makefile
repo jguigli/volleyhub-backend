@@ -19,8 +19,8 @@ help: ## Show this help
 dev: ## Start all services (build + detached)
 	docker compose up --build -d
 
-prod: ## Start all services in production mode
-	docker compose up --build -d
+prod: ## Start all services in production mode (ignores override)
+	docker compose -f docker-compose.yml up --build -d
 
 build: ## Rebuild all images
 	docker compose build --no-cache

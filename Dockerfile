@@ -3,10 +3,10 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY api/package*.json ./
 RUN npm install
 
-COPY . .
+COPY api/ .
 
 EXPOSE 3000
 
@@ -23,7 +23,7 @@ FROM node:20-alpine AS production
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY api/package*.json ./
 RUN npm install --omit=dev
 
 COPY --from=compile /app/dist ./dist
