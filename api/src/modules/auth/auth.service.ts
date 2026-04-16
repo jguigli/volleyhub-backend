@@ -1,16 +1,19 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { ILike, Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { compare, hash } from 'bcryptjs';
+import { randomInt } from 'crypto';
 import { User } from '../users/user.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { EmailService } from '../email/email.service';
 
 @Injectable()
 export class AuthService {
@@ -22,6 +25,7 @@ export class AuthService {
     private readonly userRepo: Repository<User>,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    private readonly emailService: EmailService,
   ) {
     this.bcryptRounds = this.config.get<number>('app.bcryptRounds') ?? 12;
     this.refreshExpiresIn =
@@ -31,8 +35,12 @@ export class AuthService {
   async register(
     dto: RegisterDto,
   ): Promise<{ accessToken: string; refreshToken: string; user: Partial<User> }> {
+    // Case-insensitive check on both email and username
     const existing = await this.userRepo.findOne({
-      where: [{ email: dto.email }, { username: dto.username }],
+      where: [
+        { email: ILike(dto.email) },
+        { username: ILike(dto.username) },
+      ],
     });
 
     if (existing) {
@@ -60,7 +68,9 @@ export class AuthService {
   async login(
     dto: LoginDto,
   ): Promise<{ accessToken: string; refreshToken: string; user: Partial<User> }> {
-    const user = await this.userRepo.findOne({ where: { email: dto.email } });
+    const user = await this.userRepo.findOne({
+      where: { email: ILike(dto.email) },
+    });
 
     if (!user || !(await compare(dto.password, user.passwordHash))) {
       throw new UnauthorizedException('Invalid credentials');
@@ -96,6 +106,70 @@ export class AuthService {
     } catch {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
+  }
+
+  /**
+   * Generate a 6-digit code using cryptographically secure randomness.
+   * Uses crypto.randomInt() (not Math.random) to prevent prediction.
+   * Range: 100000-999999 (always 6 digits, never starts with 0).
+   */
+  private generateSecureCode(): string {
+    const code = randomInt(100000, 1000000);
+    return String(code);
+  }
+
+  async requestPasswordReset(email: string): Promise<void> {
+    const user = await this.userRepo.findOne({
+      where: { email: ILike(email) },
+    });
+    // Silently return if user not found (prevent email enumeration)
+    if (!user) {
+      return;
+    }
+    const code = this.generateSecureCode();
+    // Hash the code with bcrypt before storing — like a password.
+    // Even if the DB is compromised, codes cannot be reverse-engineered.
+    const codeHash = await hash(code, this.bcryptRounds);
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+    user.passwordResetToken = codeHash;
+    user.passwordResetExpiresAt = expiresAt;
+    await this.userRepo.save(user);
+    // Email the plaintext code (only place it ever exists in clear)
+    await this.emailService.sendPasswordResetEmail(
+      user.email,
+      user.username,
+      code,
+    );
+  }
+
+  async resetPassword(
+    email: string,
+    code: string,
+    newPassword: string,
+  ): Promise<void> {
+    if (!email || !code || newPassword.length < 8) {
+      throw new BadRequestException('Invalid input');
+    }
+    const user = await this.userRepo.findOne({
+      where: { email: ILike(email) },
+    });
+    if (
+      !user ||
+      !user.passwordResetToken ||
+      !user.passwordResetExpiresAt ||
+      user.passwordResetExpiresAt.getTime() < Date.now()
+    ) {
+      throw new BadRequestException('Invalid or expired code');
+    }
+    // Timing-safe comparison via bcrypt.compare
+    const isValid = await compare(code, user.passwordResetToken);
+    if (!isValid) {
+      throw new BadRequestException('Invalid or expired code');
+    }
+    user.passwordHash = await hash(newPassword, this.bcryptRounds);
+    user.passwordResetToken = null;
+    user.passwordResetExpiresAt = null;
+    await this.userRepo.save(user);
   }
 
   private generateTokens(user: User): {

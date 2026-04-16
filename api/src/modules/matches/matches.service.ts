@@ -261,9 +261,14 @@ export class MatchesService {
       const teamA = match.participants.filter((p) => p.teamIndex === 0);
       const teamB = match.participants.filter((p) => p.teamIndex === 1);
       if (teamA.length === 0 || teamB.length === 0) {
+        const flagKey = `auto-cancel:notified:${id}`;
+        const already = await this.redisService.get(flagKey);
         await this.matchRepo.update(id, { status: MatchStatus.COMPLETED });
         match.status = MatchStatus.COMPLETED;
-        this.notificationsService.notifyEventCompleted(match).catch(() => {});
+        if (!already) {
+          await this.redisService.set(flagKey, '1', 86400);
+          this.notificationsService.notifyEventCancelledNotEnoughPlayers(match).catch(() => {});
+        }
       }
     }
 
@@ -309,6 +314,8 @@ export class MatchesService {
              m.match_sets AS match_sets,
              m.points_to_win AS points_to_win,
              m.scoring_rule AS scoring_rule,
+             m.set_scores AS set_scores,
+             m.tournament_games AS tournament_games,
              m.tournament_points_per_match AS tournament_points_per_match,
              c.id AS court_id, c.name AS court_name, c.type AS court_type,
              c.address AS court_address,
@@ -693,8 +700,14 @@ export class MatchesService {
       )
       SELECT
         COALESCE((
-          SELECT COUNT(*)::int FROM um
-          WHERE status = 'completed'
+          SELECT COUNT(*)::int FROM um u2
+          JOIN matches m2 ON m2.id = u2.id
+          WHERE u2.status = 'completed'
+            AND (
+              (m2.event_format = 'match' AND m2.set_scores IS NOT NULL AND m2.set_scores != '[]'::jsonb)
+              OR
+              (m2.event_format = 'tournament' AND m2.tournament_games IS NOT NULL AND m2.tournament_games != '[]'::jsonb)
+            )
         ), 0) AS played,
         COALESCE((SELECT COUNT(*)::int FROM um WHERE creator_id = $1), 0) AS created,
         COALESCE((SELECT COUNT(*)::int FROM um WHERE status IN ('open','full')), 0) AS upcoming
@@ -723,6 +736,11 @@ export class MatchesService {
       WHERE (m.creator_id = $1 OR mp.user_id = $1)
         AND m.status = 'completed'
         AND ($2::text IS NULL OR m.event_format::text = $2::text)
+        AND (
+          (m.event_format = 'match' AND m.set_scores IS NOT NULL AND m.set_scores != '[]'::jsonb)
+          OR
+          (m.event_format = 'tournament' AND m.tournament_games IS NOT NULL AND m.tournament_games != '[]'::jsonb)
+        )
       ORDER BY m.scheduled_at DESC
       `,
       [userId, eventFormat ?? null],
@@ -827,6 +845,8 @@ export class MatchesService {
              m.match_sets AS match_sets,
              m.points_to_win AS points_to_win,
              m.scoring_rule AS scoring_rule,
+             m.set_scores AS set_scores,
+             m.tournament_games AS tournament_games,
              m.tournament_points_per_match AS tournament_points_per_match,
              m.creator_id,
              u.username AS creator_username,
@@ -997,15 +1017,106 @@ export class MatchesService {
       await this.matchRepo.update(matchId, {
         scheduledAt: new Date(),
       });
-      // For tournaments, activate the bracket
+      // For tournaments, seed fixtures and activate the bracket
       if (match.eventFormat === EventFormat.TOURNAMENT) {
         const updatedMatch = await this.findById(matchId);
+        const existingFixtures = await this.fixtureRepo.count({ where: { eventMatchId: matchId } });
+        if (existingFixtures === 0 && updatedMatch.teamCount && updatedMatch.tournamentSystem) {
+          await this.seedTournamentFixturesForNewMatch(
+            matchId,
+            updatedMatch.tournamentSystem as TournamentSystem,
+            updatedMatch.teamCount,
+            updatedMatch.tournamentPointsPerMatch ?? 21,
+            updatedMatch.tournamentCourtCount ?? 1,
+          );
+        }
         await this.activateTournamentBracket(updatedMatch);
       }
       await this.invalidateNearbyCache();
       const startedMatch = await this.findById(matchId);
       this.notificationsService.notifyEventStartedEarly(startedMatch, match.creator?.username ?? 'Organizer').catch(() => {});
       return startedMatch;
+    }
+
+    // --- Launch tournament bracket manually ---
+    if (dto.launchBracket === true) {
+      if (match.eventFormat !== EventFormat.TOURNAMENT) {
+        throw new BadRequestException('Only tournaments can launch a bracket');
+      }
+      const existingFixtures = await this.fixtureRepo.count({ where: { eventMatchId: matchId } });
+      if (existingFixtures > 0) {
+        throw new BadRequestException('Bracket already launched');
+      }
+      if (!match.teamCount || !match.tournamentSystem) {
+        throw new BadRequestException('Tournament not properly configured');
+      }
+
+      // Identify empty teams (0 players)
+      const teamPlayerCount = new Map<number, number>();
+      for (let i = 0; i < match.teamCount; i++) {
+        teamPlayerCount.set(i, 0);
+      }
+      for (const p of match.participants) {
+        if (p.teamIndex != null && p.teamIndex >= 0 && p.teamIndex < match.teamCount) {
+          teamPlayerCount.set(p.teamIndex, (teamPlayerCount.get(p.teamIndex) ?? 0) + 1);
+        }
+      }
+      const emptyTeams = new Set<number>();
+      for (const [teamIdx, count] of teamPlayerCount) {
+        if (count === 0) emptyTeams.add(teamIdx);
+      }
+
+      await this.seedTournamentFixturesForNewMatch(
+        matchId,
+        match.tournamentSystem as TournamentSystem,
+        match.teamCount,
+        match.tournamentPointsPerMatch ?? 21,
+        match.tournamentCourtCount ?? 1,
+      );
+      await this.activateTournamentBracket(match);
+
+      // Auto-forfeit empty teams: set their score to 0 and lock it
+      if (emptyTeams.size > 0) {
+        const fixtures = await this.fixtureRepo.find({
+          where: { eventMatchId: matchId },
+        });
+        for (const f of fixtures) {
+          if (f.status !== FixtureStatus.LIVE && f.status !== FixtureStatus.READY) continue;
+          const aEmpty = f.teamAIndex != null && emptyTeams.has(f.teamAIndex);
+          const bEmpty = f.teamBIndex != null && emptyTeams.has(f.teamBIndex);
+
+          if (aEmpty && bEmpty) {
+            // Double forfeit: no winner, match ends immediately
+            f.scoreA = 0;
+            f.scoreB = 0;
+            f.scoreAConfirmed = true;
+            f.scoreBConfirmed = true;
+            f.status = FixtureStatus.FINISHED;
+            f.endedAt = new Date();
+            f.courtIndex = null;
+            // Don't propagate any winner — the next match will have a bye on this slot
+            await this.fixtureRepo.save(f);
+            continue;
+          }
+
+          if (aEmpty) {
+            f.scoreA = 0;
+            f.scoreAConfirmed = true;
+          }
+          if (bEmpty) {
+            f.scoreB = 0;
+            f.scoreBConfirmed = true;
+          }
+          if (aEmpty || bEmpty) {
+            await this.fixtureRepo.save(f);
+          }
+        }
+        // Re-run the engine to resolve walkovers and propagate winners
+        await this.activateTournamentBracket(match);
+      }
+
+      await this.invalidateNearbyCache();
+      return this.findById(matchId);
     }
 
     if (dto.teamAssignments != null) {
@@ -1378,6 +1489,7 @@ export class MatchesService {
   async confirmFixtureScore(
     fixtureId: string,
     userId: string,
+    forceSide?: 'A' | 'B',
   ): Promise<TournamentFixtureMatch> {
     const fixture = await this.fixtureRepo.findOne({ where: { id: fixtureId } });
     if (!fixture) {
@@ -1390,7 +1502,13 @@ export class MatchesService {
     if (fixture.status !== FixtureStatus.LIVE) {
       throw new BadRequestException('Fixture is not live');
     }
-    const side = this.getFixtureSideForUser(fixture, match, userId);
+    // Organizer can force-confirm a specific side
+    let side: 'A' | 'B' | null = null;
+    if (forceSide && match.creatorId === userId) {
+      side = forceSide;
+    } else {
+      side = this.getFixtureSideForUser(fixture, match, userId);
+    }
     if (!side) {
       throw new ForbiddenException('You are not on a team in this fixture');
     }
@@ -1580,14 +1698,25 @@ export class MatchesService {
       throw new BadRequestException('Match is cancelled');
     }
 
-    // Block team changes once the event has started (live)
+    // Block team changes once the event has started
+    // For matches: locked when scheduledAt is reached
+    // For tournaments: locked only when bracket is launched (fixtures exist)
     const isLive =
       match.status !== MatchStatus.COMPLETED &&
       new Date(match.scheduledAt).getTime() <= Date.now();
     if (isLive && teamIndex !== null) {
-      throw new BadRequestException(
-        'Teams are locked while the event is in progress',
-      );
+      if (match.eventFormat === EventFormat.TOURNAMENT) {
+        const fixtureCount = await this.fixtureRepo.count({ where: { eventMatchId: matchId } });
+        if (fixtureCount > 0) {
+          throw new BadRequestException(
+            'Teams are locked after the tournament bracket has been launched',
+          );
+        }
+      } else {
+        throw new BadRequestException(
+          'Teams are locked while the event is in progress',
+        );
+      }
     }
 
     const participant = await this.participantRepo.findOne({
@@ -1825,9 +1954,6 @@ export class MatchesService {
     try {
       await this.ensureTournamentFixturesFromLegacy(match);
 
-      // Check incomplete teams once when event goes live
-      await this.checkIncompleteTeamsOnStart(match);
-
       const fixtures = await this.fixtureRepo.find({
         where: { eventMatchId: match.id },
         order: { round: 'ASC', order: 'ASC' },
@@ -1842,142 +1968,6 @@ export class MatchesService {
       // Keep match detail readable even if fixture storage is not yet available.
       Object.assign(match, { tournamentFixtures: [] });
     }
-  }
-
-  /**
-   * When a tournament event goes live, check if any teams are incomplete
-   * (fewer than teamSize players). If so, delete all fixtures and regenerate
-   * the bracket with only the complete teams, re-indexed 0..n-1.
-   * Runs once per tournament, tracked via a Redis flag.
-   * The flag is ONLY set after successfully processing — never before.
-   */
-  private async checkIncompleteTeamsOnStart(match: Match): Promise<void> {
-    if (
-      match.eventFormat !== EventFormat.TOURNAMENT ||
-      match.teamCount == null ||
-      match.teamSize == null ||
-      match.tournamentSystem == null
-    ) {
-      return;
-    }
-
-    const now = Date.now();
-    const startMs = new Date(match.scheduledAt).getTime();
-    if (
-      now < startMs ||
-      match.status === MatchStatus.COMPLETED ||
-      match.status === MatchStatus.CANCELLED
-    ) {
-      return;
-    }
-
-    // Only run once per tournament
-    const flagKey = `tournament:${match.id}:teams_checked`;
-    const alreadyChecked = await this.redisService.get(flagKey);
-    if (alreadyChecked) {
-      return;
-    }
-
-    // Count players per team
-    const teamPlayerCount = new Map<number, number>();
-    for (let i = 0; i < match.teamCount; i++) {
-      teamPlayerCount.set(i, 0);
-    }
-    for (const p of match.participants) {
-      if (
-        p.teamIndex != null &&
-        p.teamIndex >= 0 &&
-        p.teamIndex < match.teamCount
-      ) {
-        teamPlayerCount.set(
-          p.teamIndex,
-          (teamPlayerCount.get(p.teamIndex) ?? 0) + 1,
-        );
-      }
-    }
-
-    // Find complete teams (at least teamSize players)
-    const completeTeams: number[] = [];
-    for (const [teamIdx, count] of teamPlayerCount) {
-      if (count >= match.teamSize) {
-        completeTeams.push(teamIdx);
-      }
-    }
-    completeTeams.sort((a, b) => a - b);
-
-    // If all teams are complete, activate the bracket and return
-    if (completeTeams.length === match.teamCount) {
-      await this.activateTournamentBracket(match);
-      await this.redisService.set(flagKey, '1', 86400 * 7);
-      return;
-    }
-
-    // 0 or 1 complete team → tournament is over immediately
-    if (completeTeams.length < 2) {
-      await this.fixtureRepo.delete({ eventMatchId: match.id });
-      await this.matchRepo.update(match.id, {
-        status: MatchStatus.COMPLETED,
-        teamCount: completeTeams.length,
-        maxPlayers: completeTeams.length * (match.teamSize ?? 1),
-        tournamentGames: [] as unknown as Match['tournamentGames'],
-      });
-      match.status = MatchStatus.COMPLETED;
-      match.teamCount = completeTeams.length;
-      match.tournamentGames = [] as unknown as Match['tournamentGames'];
-      await this.redisService.set(flagKey, '1', 86400 * 7);
-      return;
-    }
-
-    // 2+ complete teams but not all — rebuild bracket
-
-    // Build mapping: old team index → new team index (0-based compact)
-    const oldToNew = new Map<number, number>();
-    completeTeams.forEach((oldIdx, newIdx) => {
-      oldToNew.set(oldIdx, newIdx);
-    });
-
-    // Re-index participants to new team indices
-    for (const p of match.participants) {
-      if (p.teamIndex != null && oldToNew.has(p.teamIndex)) {
-        const newIdx = oldToNew.get(p.teamIndex)!;
-        if (p.teamIndex !== newIdx) {
-          p.teamIndex = newIdx;
-          await this.participantRepo.update(
-            { matchId: match.id, userId: p.userId },
-            { teamIndex: newIdx },
-          );
-        }
-      } else if (p.teamIndex != null) {
-        p.teamIndex = null;
-        await this.participantRepo.update(
-          { matchId: match.id, userId: p.userId },
-          { teamIndex: null },
-        );
-      }
-    }
-
-    // Delete old fixtures and regenerate
-    await this.fixtureRepo.delete({ eventMatchId: match.id });
-
-    const newTeamCount = completeTeams.length;
-    await this.matchRepo.update(match.id, {
-      teamCount: newTeamCount,
-      maxPlayers: newTeamCount * match.teamSize,
-    });
-    match.teamCount = newTeamCount;
-    match.maxPlayers = newTeamCount * match.teamSize;
-
-    await this.seedTournamentFixturesForNewMatch(
-      match.id,
-      match.tournamentSystem as TournamentSystem,
-      newTeamCount,
-      match.tournamentPointsPerMatch ?? 21,
-      match.tournamentCourtCount ?? 1,
-    );
-    await this.activateTournamentBracket(match);
-
-    // Set flag AFTER successful processing
-    await this.redisService.set(flagKey, '1', 86400 * 7);
   }
 
   private async seedTournamentFixturesForNewMatch(

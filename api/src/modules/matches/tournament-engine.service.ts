@@ -53,6 +53,11 @@ export class TournamentEngineService {
       if (f.status === FixtureStatus.FINISHED) {
         continue;
       }
+      // Only apply walkovers to READY or LIVE fixtures.
+      // PENDING fixtures may still be waiting for a winner to propagate.
+      if (f.status !== FixtureStatus.READY && f.status !== FixtureStatus.LIVE) {
+        continue;
+      }
       if (f.teamAIndex != null && f.teamBIndex == null) {
         f.status = FixtureStatus.FINISHED;
         f.scoreA = targetPoints;

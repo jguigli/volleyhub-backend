@@ -8,6 +8,7 @@ import { UsersModule } from './modules/users/users.module';
 import { CourtsModule } from './modules/courts/courts.module';
 import { MatchesModule } from './modules/matches/matches.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { AdminModule } from './modules/admin/admin.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { RedisModule } from './modules/redis/redis.module';
 import appConfig from './config/app.config';
@@ -45,6 +46,7 @@ import databaseConfig from './config/database.config';
     CourtsModule,
     MatchesModule,
     NotificationsModule,
+    AdminModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

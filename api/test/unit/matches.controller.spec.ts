@@ -204,9 +204,9 @@ describe('MatchesController (unit)', () => {
 
   describe('confirmFixtureScore', () => {
     it('should pass fixtureId and user id', async () => {
-      await controller.confirmFixtureScore('fix-1', fakeUser as any);
+      await controller.confirmFixtureScore('fix-1', fakeUser as any, undefined);
 
-      expect(matchesService.confirmFixtureScore).toHaveBeenCalledWith('fix-1', 'user-1');
+      expect(matchesService.confirmFixtureScore).toHaveBeenCalledWith('fix-1', 'user-1', undefined);
     });
   });
 

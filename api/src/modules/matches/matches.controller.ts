@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { MatchesService } from './matches.service';
 import { MatchChatService } from './match-chat.service';
 import { CreateMatchDto } from './dto/create-match.dto';
@@ -92,8 +93,9 @@ export class MatchesController {
   confirmFixtureScore(
     @Param('fixtureId') fixtureId: string,
     @CurrentUser() user: User,
+    @Body('side') side?: 'A' | 'B',
   ) {
-    return this.matchesService.confirmFixtureScore(fixtureId, user.id);
+    return this.matchesService.confirmFixtureScore(fixtureId, user.id, side);
   }
 
   @Patch('fixtures/:fixtureId/override')
@@ -137,6 +139,7 @@ export class MatchesController {
 
   @Post()
   @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 2, ttl: 3600000 } })
   create(@CurrentUser() user: User, @Body() dto: CreateMatchDto) {
     return this.matchesService.create(user.id, dto);
   }

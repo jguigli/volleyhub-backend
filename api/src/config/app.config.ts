@@ -20,5 +20,18 @@ export default registerAs('app', () => {
       privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
     },
+    email: {
+      resendApiKey: process.env.RESEND_API_KEY,
+      from: process.env.EMAIL_FROM ?? 'VolleyHub <noreply@volleyhub.app>',
+    },
+    appUrl: process.env.APP_URL ?? 'http://localhost:3000',
+    admin: {
+      email: process.env.ADMIN_SEED_EMAIL ?? null,
+      password: process.env.ADMIN_SEED_PASSWORD ?? null,
+      username: process.env.ADMIN_SEED_USERNAME ?? 'admin',
+    },
+    sentry: {
+      dsn: process.env.SENTRY_DSN ?? null,
+    },
   };
 });

@@ -60,11 +60,11 @@ FIREBASE_CLIENT_EMAIL=ton-email@project.iam.gserviceaccount.com
 
 ### Privacy Manifest (iOS 17+)
 Apple exige une declaration des APIs sensibles utilisees par l'app :
-- [❌] Localisation (NSLocationWhenInUseUsageDescription)
-- [❌] Camera (NSCameraUsageDescription)
-- [❌] Photos (NSPhotoLibraryUsageDescription)
-- [❌] Notifications push
-- [❌] UserDefaults / SecureStore
+- [✅] Localisation (NSLocationWhenInUseUsageDescription)
+- [✅] Camera (NSCameraUsageDescription)
+- [✅] Photos (NSPhotoLibraryUsageDescription)
+- [✅] Notifications push
+- [✅] UserDefaults / SecureStore
 
 Ajouter dans `app.json` > `expo` > `ios` > `privacyManifests` si necessaire.
 

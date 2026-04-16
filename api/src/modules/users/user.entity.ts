@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToMany,
+  Index,
 } from 'typeorm';
 import { SkillLevel, Position, League } from '../../common/enums';
 import { MatchParticipant } from '../matches/match-participant.entity';
@@ -62,6 +63,17 @@ export class User {
 
   @Column({ type: 'varchar', name: 'fcm_token', nullable: true })
   fcmToken: string | null;
+
+  @Index()
+  @Column({ type: 'varchar', name: 'password_reset_token', nullable: true })
+  passwordResetToken: string | null;
+
+  @Column({ type: 'timestamp', name: 'password_reset_expires_at', nullable: true })
+  passwordResetExpiresAt: Date | null;
+
+  /** Admin flag. True = panel admin access + hidden from all public endpoints. */
+  @Column({ type: 'boolean', name: 'is_admin', default: false })
+  isAdmin: boolean;
 
   @Column({
     type: 'geography',

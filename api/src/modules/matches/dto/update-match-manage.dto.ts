@@ -156,4 +156,9 @@ export class UpdateMatchManageDto {
 
   @IsOptional()
   startNow?: boolean;
+
+  // --- Launch tournament bracket (when tournament is live but bracket not yet generated) ---
+
+  @IsOptional()
+  launchBracket?: boolean;
 }

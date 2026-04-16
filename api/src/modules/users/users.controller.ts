@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Request,
   UseGuards,
 } from '@nestjs/common';
@@ -24,6 +25,12 @@ export class UsersController {
   @UseGuards(JwtAuthGuard)
   getIncomingFollowRequests(@CurrentUser() user: User) {
     return this.usersService.getIncomingFollowRequests(user.id);
+  }
+
+  @Get('search')
+  @UseGuards(JwtAuthGuard)
+  searchUsers(@Query('q') q: string, @CurrentUser() user: User) {
+    return this.usersService.searchByUsername(q ?? '', user.id);
   }
 
   @Post(':id/follow-requests')

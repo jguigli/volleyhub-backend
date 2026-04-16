@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { ILike, Not, Repository } from 'typeorm';
 import { User } from './user.entity';
 import { Follow } from './follow.entity';
 import { FollowRequest } from './follow-request.entity';
@@ -60,6 +60,45 @@ export class UsersService {
     return this.sanitize(user);
   }
 
+  /**
+   * Search users by username (case-insensitive partial match).
+   * Excludes the current user from results. Limited to 20 results.
+   */
+  async searchByUsername(
+    query: string,
+    currentUserId: string,
+  ): Promise<PublicProfile[]> {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) {
+      return [];
+    }
+    // Escape LIKE wildcards to prevent injection of % or _
+    const safe = trimmed.replace(/[%_\\]/g, (c) => `\\${c}`);
+    const users = await this.userRepo.find({
+      where: {
+        username: ILike(`%${safe}%`),
+        id: Not(currentUserId),
+        isAdmin: false,
+      },
+      take: 20,
+      order: { username: 'ASC' },
+    });
+    return users.map((u) => ({
+      id: u.id,
+      username: u.username,
+      skillLevel: u.skillLevel,
+      position: u.position,
+      club: u.club,
+      competition: u.competition,
+      league: u.league,
+      profilePicture: u.profilePicture,
+      bio: u.bio,
+      createdAt: u.createdAt,
+      followersCount: 0,
+      followingCount: 0,
+    }));
+  }
+
   async getPublicProfile(
     id: string,
     requesterId?: string,
@@ -71,6 +110,8 @@ export class UsersService {
     if (!base) {
       const user = await this.userRepo.findOne({ where: { id } });
       if (!user) throw new NotFoundException('User not found');
+      // Admin accounts are hidden from public endpoints
+      if (user.isAdmin) throw new NotFoundException('User not found');
 
       // Count unique connected users (union of followers and following)
       const [followers, following] = await Promise.all([

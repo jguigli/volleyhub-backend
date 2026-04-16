@@ -1,9 +1,14 @@
+// Sentry must be initialized before any other import that could throw.
+import { initSentry } from './common/sentry/sentry.init';
+initSentry();
+
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { json, urlencoded } from 'express';
+import { SentryExceptionFilter } from './common/sentry/sentry.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -20,6 +25,9 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  // Global filter that captures 5xx / unhandled errors and sends them to Sentry
+  app.useGlobalFilters(new SentryExceptionFilter());
 
   const allowedOrigins = config
     .get<string>('app.allowedOrigins', 'http://localhost:3000')

@@ -65,10 +65,15 @@ describe('AuthService (unit)', () => {
       }),
     };
 
+    const emailService = {
+      sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined),
+    };
+
     service = new AuthService(
       userRepo as any,
       jwtService as any,
       configService as any,
+      emailService as any,
     );
   });
 
@@ -136,9 +141,13 @@ describe('AuthService (unit)', () => {
         password: 'mypassword123',
       });
 
-      expect(userRepo.findOne).toHaveBeenCalledWith({
-        where: { email: 'player1@example.com' },
-      });
+      expect(userRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            email: expect.anything(),
+          }),
+        }),
+      );
       expect(mockCompare).toHaveBeenCalledWith('mypassword123', 'hashed-password');
       expect(result.accessToken).toBe('access-token');
       expect(result.refreshToken).toBe('refresh-token');

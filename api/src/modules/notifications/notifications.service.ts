@@ -28,7 +28,8 @@ export type NotificationType =
   | 'connection_accepted'
   | 'player_left_event'
   | 'event_reminder_30min'
-  | 'chat_message';
+  | 'chat_message'
+  | 'event_cancelled_not_enough_players';
 
 export interface NotificationItem {
   id: string;
@@ -413,6 +414,20 @@ export class NotificationsService implements OnModuleInit {
     }, {
       title: 'New message',
       body: `${senderUsername} sent a message in the group chat.`,
+    });
+  }
+
+  async notifyEventCancelledNotEnoughPlayers(match: Match): Promise<void> {
+    const ids = await this.getParticipantIds(match.id);
+    if (ids.length === 0) return;
+    await this.storeAndPushToMany(ids, {
+      id: randomUUID(),
+      type: 'event_cancelled_not_enough_players',
+      matchId: match.id,
+      createdAt: new Date().toISOString(),
+    }, {
+      title: 'Event ended',
+      body: 'The event ended because there were not enough players in each team.',
     });
   }
 }
