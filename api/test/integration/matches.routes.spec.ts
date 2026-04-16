@@ -362,7 +362,7 @@ describe('Matches routes (integration)', () => {
       .send({})
       .expect(201);
 
-    expect(matchesService.confirmFixtureScore).toHaveBeenCalledWith('f1', 'u-auth');
+    expect(matchesService.confirmFixtureScore).toHaveBeenCalledWith('f1', 'u-auth', undefined);
     expect(res.body).toEqual({ id: 'f1' });
   });
 
