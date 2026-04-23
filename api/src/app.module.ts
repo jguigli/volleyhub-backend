@@ -33,6 +33,7 @@ import databaseConfig from './config/database.config';
           synchronize: !isProd,
           migrationsRun: isProd,
           logging: false,
+          ssl: isProd ? { rejectUnauthorized: false } : false,
         };
       },
     }),

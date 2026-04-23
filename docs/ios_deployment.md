@@ -3,7 +3,7 @@
 ## Pre-requis
 
 ### Compte & Certificats
-- [❌] Compte Apple Developer (99$/an) — [developer.apple.com](https://developer.apple.com)
+- [✅] Compte Apple Developer (99$/an) — [developer.apple.com](https://developer.apple.com)
 - [✅] EAS CLI installe (`npm install -g eas-cli`)
 - [❌] Login EAS (`eas login`)
 - [❌] Certificats & Provisioning configures (`eas credentials` — automatique)
@@ -16,7 +16,7 @@
 
 ```env
 # Obligatoire
-DATABASE_URL=postgresql://user:password@host:5432/volleyfinder
+DATABASE_URL=postgresql://user:password@host:5432/volleyhub
 JWT_SECRET=une-cle-secrete-de-32-caracteres-minimum
 ALLOWED_ORIGINS=https://ton-domaine.com
 
@@ -38,15 +38,15 @@ FIREBASE_CLIENT_EMAIL=ton-email@project.iam.gserviceaccount.com
 - [❌] Variable mobile `EXPO_PUBLIC_API_URL` pointe vers l'API production
 
 ### Assets obligatoires
-- [❌] Icone 1024x1024px (PNG, sans transparence, sans coins arrondis)
+- [✅] Icone 1024x1024px (PNG, sans transparence, sans coins arrondis)
 - [❌] Screenshots iPhone 6.7" (iPhone 15 Pro Max) — 2 a 5 images, 1290x2796px
 - [❌] Screenshots iPhone 6.1" (iPhone 15) — 2 a 5 images, 1179x2556px
-- [❌] Optimiser `logo.png` (actuellement 997KB, reduire a ~100KB)
+- [✅] Optimiser `logo.png` (actuellement 997KB, reduire a ~100KB)
 
 ### Pages legales (obligatoire Apple)
-- [❌] Politique de confidentialite — page web hebergee (URL publique)
-- [❌] Conditions d'utilisation — page web hebergee (URL publique)
-- [❌] URL de support / contact
+- [✅] Politique de confidentialite — page web hebergee (URL publique)
+- [✅] Conditions d'utilisation — page web hebergee (URL publique)
+- [✅] URL de support / contact
 
 ### Fiche App Store Connect
 - [❌] Creer l'app dans [App Store Connect](https://appstoreconnect.apple.com)
