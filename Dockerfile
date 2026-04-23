@@ -1,4 +1,4 @@
-# --- Stage 1: dev dependencies + source (used directly in dev mode) ---
+# --- Stage 1: build ---
 FROM node:20-alpine AS builder
 
 WORKDIR /app
@@ -8,25 +8,17 @@ RUN npm install
 
 COPY api/ .
 
-EXPOSE 3000
-
-# Default CMD for dev (overridden by docker-compose.override.yml)
-CMD ["npm", "run", "start:dev"]
-
-# --- Stage 2: compile for production ---
-FROM builder AS compile
-
 RUN npm run build
 
-# --- Stage 3: lean production image ---
+# --- Stage 2: production ---
 FROM node:20-alpine AS production
 
 WORKDIR /app
 
-COPY api/package*.json ./
+COPY --from=builder /app/package*.json ./
 RUN npm install --omit=dev
 
-COPY --from=compile /app/dist ./dist
+COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
 
