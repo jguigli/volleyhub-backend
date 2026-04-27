@@ -61,6 +61,9 @@ export class User {
   @Column({ type: 'text', nullable: true })
   bio: string | null;
 
+  @Column({ type: 'varchar', length: 5, default: 'fr' })
+  locale: string;
+
   @Column({ type: 'varchar', name: 'fcm_token', nullable: true })
   fcmToken: string | null;
 

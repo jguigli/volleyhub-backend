@@ -325,6 +325,7 @@ export class UsersService {
       user.bio = dto.bio.trim() ? dto.bio.trim() : null;
     }
     if (dto.fcmToken !== undefined) user.fcmToken = dto.fcmToken;
+    if (dto.locale !== undefined) user.locale = dto.locale;
 
     if (dto.lat !== undefined && dto.lng !== undefined) {
       await this.userRepo.query(

@@ -52,6 +52,11 @@ export class UpdateProfileDto {
   @IsOptional()
   fcmToken?: string;
 
+  @IsString()
+  @IsOptional()
+  @MaxLength(5)
+  locale?: string;
+
   @IsNumber()
   @Min(-90)
   @Max(90)

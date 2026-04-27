@@ -8,6 +8,7 @@ import { User } from '../users/user.entity';
 import { Match } from '../matches/match.entity';
 import { MatchParticipant } from '../matches/match-participant.entity';
 import { RedisService } from '../redis/redis.service';
+import { getPushText } from './push-translations';
 
 const NOTIF_TTL = 60 * 60 * 24 * 30; // 30 days
 const NOTIF_MAX = 200;
@@ -130,11 +131,13 @@ export class NotificationsService implements OnModuleInit {
   private async storeAndPushToUser(
     userId: string,
     item: NotificationItem,
-    push: { title: string; body: string },
+    pushKey: string,
+    pushArgs: string[] = [],
   ): Promise<void> {
     await this.storeNotification(userId, item);
     const u = await this.userRepo.findOne({ where: { id: userId } });
     if (u?.fcmToken) {
+      const push = getPushText(u.locale, pushKey, ...pushArgs);
       await this.sendPush(u.fcmToken, { ...push, data: { type: item.type, matchId: item.matchId ?? '' } });
     }
   }
@@ -142,7 +145,8 @@ export class NotificationsService implements OnModuleInit {
   private async storeAndPushToMany(
     userIds: string[],
     item: NotificationItem,
-    push: { title: string; body: string },
+    pushKey: string,
+    pushArgs: string[] = [],
   ): Promise<void> {
     for (const uid of userIds) {
       await this.storeNotification(uid, { ...item, id: randomUUID() });
@@ -155,6 +159,7 @@ export class NotificationsService implements OnModuleInit {
       .getMany();
     for (const u of users) {
       if (u.fcmToken) {
+        const push = getPushText(u.locale, pushKey, ...pushArgs);
         await this.sendPush(u.fcmToken, { ...push, data: { type: item.type, matchId: item.matchId ?? '' } });
       }
     }
@@ -183,10 +188,7 @@ export class NotificationsService implements OnModuleInit {
       actorId: joiningUserId,
       extra: { current: String(match.currentPlayers), max: String(match.maxPlayers) },
       createdAt: new Date().toISOString(),
-    }, {
-      title: 'Someone joined your game!',
-      body: `${username} joined your match (${match.currentPlayers}/${match.maxPlayers})`,
-    });
+    }, 'player_joined', [username, String(match.currentPlayers), String(match.maxPlayers)]);
   }
 
   async notifyMatchAlmostFull(match: Match): Promise<void> {
@@ -199,10 +201,7 @@ export class NotificationsService implements OnModuleInit {
       matchId: match.id,
       extra: { spots: String(spotsLeft) },
       createdAt: new Date().toISOString(),
-    }, {
-      title: 'Match almost full!',
-      body: `Only ${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left!`,
-    });
+    }, 'match_almost_full', [String(spotsLeft)]);
   }
 
   async notifyInvitedToMatch(matchId: string, invitedUserId: string, inviterUsername: string): Promise<void> {
@@ -212,10 +211,7 @@ export class NotificationsService implements OnModuleInit {
       matchId,
       actorUsername: inviterUsername,
       createdAt: new Date().toISOString(),
-    }, {
-      title: 'Event invitation',
-      body: `${inviterUsername} invited you to join an event.`,
-    });
+    }, 'event_invite', [inviterUsername]);
   }
 
   async notifyInvitedToRenewedMatch(matchId: string, invitedUserIds: string[], creatorUsername: string): Promise<void> {
@@ -226,10 +222,7 @@ export class NotificationsService implements OnModuleInit {
       matchId,
       actorUsername: creatorUsername,
       createdAt: new Date().toISOString(),
-    }, {
-      title: "You're in the new match",
-      body: `${creatorUsername} recreated this event.`,
-    });
+    }, 'match_renewed_invite', [creatorUsername]);
   }
 
   // ─── New notifications ──────────────────────────────────────────────
@@ -243,10 +236,7 @@ export class NotificationsService implements OnModuleInit {
       matchId: match.id,
       actorUsername: organizerUsername,
       createdAt: new Date().toISOString(),
-    }, {
-      title: 'Event updated',
-      body: `${organizerUsername} updated the event settings.`,
-    });
+    }, 'event_settings_changed', [organizerUsername]);
   }
 
   async notifyEventStartedEarly(match: Match, organizerUsername: string): Promise<void> {
@@ -258,10 +248,7 @@ export class NotificationsService implements OnModuleInit {
       matchId: match.id,
       actorUsername: organizerUsername,
       createdAt: new Date().toISOString(),
-    }, {
-      title: 'Event started!',
-      body: `${organizerUsername} started the event early. Go!`,
-    });
+    }, 'event_started_early', [organizerUsername]);
   }
 
   async notifyEventDeleted(matchId: string, participantIds: string[], organizerUsername: string): Promise<void> {
@@ -272,10 +259,7 @@ export class NotificationsService implements OnModuleInit {
       matchId,
       actorUsername: organizerUsername,
       createdAt: new Date().toISOString(),
-    }, {
-      title: 'Event cancelled',
-      body: `${organizerUsername} deleted the event.`,
-    });
+    }, 'event_deleted', [organizerUsername]);
   }
 
   async notifyPlayerRemoved(matchId: string, removedUserId: string, organizerUsername: string): Promise<void> {
@@ -285,10 +269,7 @@ export class NotificationsService implements OnModuleInit {
       matchId,
       actorUsername: organizerUsername,
       createdAt: new Date().toISOString(),
-    }, {
-      title: 'Removed from event',
-      body: `${organizerUsername} removed you from the event.`,
-    });
+    }, 'player_removed', [organizerUsername]);
   }
 
   async notifyEventFull(match: Match): Promise<void> {
@@ -299,10 +280,7 @@ export class NotificationsService implements OnModuleInit {
       type: 'event_full',
       matchId: match.id,
       createdAt: new Date().toISOString(),
-    }, {
-      title: 'Event is full!',
-      body: 'All spots are taken.',
-    });
+    }, 'event_full');
   }
 
   async notifyEventCompleted(match: Match): Promise<void> {
@@ -318,10 +296,7 @@ export class NotificationsService implements OnModuleInit {
       type: 'event_completed',
       matchId: match.id,
       createdAt: new Date().toISOString(),
-    }, {
-      title: 'Event finished!',
-      body: 'Check the results.',
-    });
+    }, 'event_completed');
   }
 
   async notifyOpponentScoreLocked(
@@ -336,10 +311,7 @@ export class NotificationsService implements OnModuleInit {
       type: 'opponent_score_locked',
       matchId,
       createdAt: new Date().toISOString(),
-    }, {
-      title: 'Opponent locked their score',
-      body: 'The other team confirmed their score. Your turn!',
-    });
+    }, 'opponent_score_locked');
   }
 
   async notifyScoreOverridden(matchId: string, teamAIndex: number, teamBIndex: number, organizerUsername: string): Promise<void> {
@@ -353,10 +325,7 @@ export class NotificationsService implements OnModuleInit {
       matchId,
       actorUsername: organizerUsername,
       createdAt: new Date().toISOString(),
-    }, {
-      title: 'Score adjusted',
-      body: `${organizerUsername} adjusted the score.`,
-    });
+    }, 'score_overridden', [organizerUsername]);
   }
 
   async notifyConnectionAccepted(accepterUserId: string, accepterUsername: string, requesterId: string): Promise<void> {
@@ -366,10 +335,7 @@ export class NotificationsService implements OnModuleInit {
       actorUsername: accepterUsername,
       actorId: accepterUserId,
       createdAt: new Date().toISOString(),
-    }, {
-      title: 'Connection accepted!',
-      body: `${accepterUsername} accepted your connection request.`,
-    });
+    }, 'connection_accepted', [accepterUsername]);
   }
 
   async notifyPlayerLeftEvent(match: Match, leavingUserId: string, leavingUsername: string): Promise<void> {
@@ -381,10 +347,7 @@ export class NotificationsService implements OnModuleInit {
       actorUsername: leavingUsername,
       actorId: leavingUserId,
       createdAt: new Date().toISOString(),
-    }, {
-      title: 'Player left',
-      body: `${leavingUsername} left your event.`,
-    });
+    }, 'player_left_event', [leavingUsername]);
   }
 
   async notifyEventReminder30min(match: Match): Promise<void> {
@@ -395,10 +358,7 @@ export class NotificationsService implements OnModuleInit {
       type: 'event_reminder_30min',
       matchId: match.id,
       createdAt: new Date().toISOString(),
-    }, {
-      title: 'Starting soon!',
-      body: 'Your event starts in 30 minutes.',
-    });
+    }, 'event_reminder_30min');
   }
 
   async notifyChatMessage(matchId: string, senderUserId: string, senderUsername: string): Promise<void> {
@@ -411,10 +371,7 @@ export class NotificationsService implements OnModuleInit {
       actorUsername: senderUsername,
       actorId: senderUserId,
       createdAt: new Date().toISOString(),
-    }, {
-      title: 'New message',
-      body: `${senderUsername} sent a message in the group chat.`,
-    });
+    }, 'chat_message', [senderUsername]);
   }
 
   async notifyEventCancelledNotEnoughPlayers(match: Match): Promise<void> {
@@ -425,9 +382,6 @@ export class NotificationsService implements OnModuleInit {
       type: 'event_cancelled_not_enough_players',
       matchId: match.id,
       createdAt: new Date().toISOString(),
-    }, {
-      title: 'Event ended',
-      body: 'The event ended because there were not enough players in each team.',
-    });
+    }, 'event_cancelled_not_enough_players');
   }
 }
