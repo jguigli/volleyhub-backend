@@ -252,10 +252,14 @@ export class MatchesService {
     }
 
     // Auto-cancel match events when going live with an empty team
+    // Skip if match was created less than 5 minutes ago (avoids cancelling on creation)
+    const GRACE_PERIOD_MS = 5 * 60 * 1000;
+    const matchAge = Date.now() - new Date(match.createdAt).getTime();
     if (
       match.eventFormat === EventFormat.MATCH &&
       match.status !== MatchStatus.COMPLETED &&
       match.status !== MatchStatus.CANCELLED &&
+      matchAge > GRACE_PERIOD_MS &&
       new Date(match.scheduledAt).getTime() <= Date.now()
     ) {
       const teamA = match.participants.filter((p) => p.teamIndex === 0);

@@ -34,7 +34,7 @@ export class EmailService {
       return;
     }
     try {
-      await this.resend.emails.send({
+      const { data, error } = await this.resend.emails.send({
         from: this.from,
         to,
         subject: `Ton code VolleyHub : ${code}`,
@@ -56,7 +56,15 @@ export class EmailService {
           </div>
         `,
       });
-      this.logger.log(`Password reset code sent to ${to}`);
+
+      if (error) {
+        this.logger.error(
+          `Resend API error for ${to}: ${error.message}`,
+        );
+        return;
+      }
+
+      this.logger.log(`Password reset code sent to ${to} (id=${data?.id})`);
     } catch (err) {
       this.logger.error(
         `Failed to send password reset email to ${to}: ${String(err)}`,
