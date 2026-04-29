@@ -51,16 +51,16 @@ const PLAYERS = [
 
 // ── Courts in Paris area + a few in France ───────────────────────
 const COURTS = [
-  { name: 'Stade Charléty', lat: 48.8184, lng: 2.3470, type: CourtType.OUTDOOR, address: '17 Av. Pierre de Coubertin, Paris 13e' },
-  { name: 'Gymnase Japy', lat: 48.8538, lng: 2.3751, type: CourtType.INDOOR, address: '2 Rue Japy, Paris 11e' },
-  { name: 'Plage de Deauville', lat: 49.3570, lng: 0.0722, type: CourtType.OUTDOOR, address: 'Boulevard de la Mer, Deauville' },
-  { name: 'Palais des Sports', lat: 48.8425, lng: 2.2942, type: CourtType.INDOOR, address: '1 Pl. de la Porte de Versailles, Paris 15e' },
-  { name: 'Terrain du Champ de Mars', lat: 48.8560, lng: 2.2977, type: CourtType.OUTDOOR, address: 'Champ de Mars, Paris 7e' },
-  { name: 'Gymnase Léo Lagrange', lat: 48.8920, lng: 2.3440, type: CourtType.INDOOR, address: '11 Rue Jean Cocteau, Paris 18e' },
-  { name: 'Plage du Prado', lat: 43.2614, lng: 5.3842, type: CourtType.OUTDOOR, address: 'Promenade Georges Pompidou, Marseille' },
-  { name: 'Arena Porte de la Chapelle', lat: 48.8976, lng: 2.3595, type: CourtType.INDOOR, address: 'Arena Porte de la Chapelle, Paris 18e' },
-  { name: 'Terrain de Vincennes', lat: 48.8439, lng: 2.4340, type: CourtType.OUTDOOR, address: 'Bois de Vincennes, Paris 12e' },
-  { name: 'Plage de Nice', lat: 43.6947, lng: 7.2662, type: CourtType.OUTDOOR, address: 'Promenade des Anglais, Nice' },
+  { lat: 48.8184, lng: 2.3470, type: CourtType.OUTDOOR, address: 'Paris, 17 Avenue Pierre de Coubertin, Paris, France' },
+  { lat: 48.8538, lng: 2.3751, type: CourtType.INDOOR, address: 'Paris, 2 Rue Japy, Paris, France' },
+  { lat: 49.3570, lng: 0.0722, type: CourtType.OUTDOOR, address: 'Deauville, Boulevard de la Mer, Calvados, France' },
+  { lat: 48.8425, lng: 2.2942, type: CourtType.INDOOR, address: 'Paris, 1 Place de la Porte de Versailles, Paris, France' },
+  { lat: 48.8560, lng: 2.2977, type: CourtType.OUTDOOR, address: 'Paris, 2 Allée Adrienne Lecouvreur, Paris, France' },
+  { lat: 48.8920, lng: 2.3440, type: CourtType.INDOOR, address: 'Paris, 11 Rue Jean Cocteau, Paris, France' },
+  { lat: 43.2614, lng: 5.3842, type: CourtType.OUTDOOR, address: 'Marseille, Promenade Georges Pompidou, Bouches-du-Rhône, France' },
+  { lat: 48.8976, lng: 2.3595, type: CourtType.INDOOR, address: 'Paris, 56 Boulevard Ney, Paris, France' },
+  { lat: 48.8439, lng: 2.4340, type: CourtType.OUTDOOR, address: 'Paris, Route de la Ceinture du Lac, Paris, France' },
+  { lat: 43.6947, lng: 7.2662, type: CourtType.OUTDOOR, address: 'Nice, Promenade des Anglais, Alpes-Maritimes, France' },
 ];
 
 const dataSource = new DataSource({
@@ -103,16 +103,13 @@ async function main() {
   // ── 2. Create courts ───────────────────────────────────────────
   const courts: Court[] = [];
   for (const c of COURTS) {
-    let court = await courtRepo.findOne({ where: { name: c.name } });
-    if (!court) {
-      const [row] = await dataSource.query(
-        `INSERT INTO courts (name, type, location, address, is_registry)
-         VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326), $5, true)
-         RETURNING *`,
-        [c.name, c.type, c.lng, c.lat, c.address],
-      );
-      court = await courtRepo.findOneOrFail({ where: { id: row.id } });
-    }
+    const [row] = await dataSource.query(
+      `INSERT INTO courts (name, type, location, address, is_registry)
+       VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326), $5, $6)
+       RETURNING *`,
+      ['Map pin location', c.type, c.lng, c.lat, c.address, false],
+    );
+    const court = await courtRepo.findOneOrFail({ where: { id: row.id } });
     courts.push(court);
   }
   console.log(`${courts.length} courts created.`);

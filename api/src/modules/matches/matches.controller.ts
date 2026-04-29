@@ -139,7 +139,7 @@ export class MatchesController {
 
   @Post()
   @UseGuards(JwtAuthGuard)
-  @Throttle({ default: { limit: 2, ttl: 3600000 } })
+  @Throttle({ default: { limit: 5, ttl: 3600000 } })
   create(@CurrentUser() user: User, @Body() dto: CreateMatchDto) {
     return this.matchesService.create(user.id, dto);
   }
