@@ -20,6 +20,7 @@ describe('Users routes (integration)', () => {
     follow: jest.fn().mockResolvedValue({ ok: true }),
     unfollow: jest.fn().mockResolvedValue({ ok: true }),
     updateProfile: jest.fn().mockResolvedValue({ id: 'u-auth', bio: 'Updated' }),
+    deleteAccount: jest.fn().mockResolvedValue(undefined),
   };
 
   const authGuard: CanActivate = {
@@ -150,5 +151,22 @@ describe('Users routes (integration)', () => {
 
     expect(usersService.getIncomingFollowRequests).toHaveBeenCalledWith('u-auth');
     expect(res.body).toEqual([{ id: 'fr1', fromUserId: 'u3' }]);
+  });
+
+  it('DELETE /users/me -> 200, calls deleteAccount(authUser) and returns success', async () => {
+    const res = await request(app.getHttpServer())
+      .delete('/users/me')
+      .expect(200);
+
+    expect(usersService.deleteAccount).toHaveBeenCalledWith('u-auth');
+    expect(res.body).toEqual({ success: true });
+  });
+
+  it('DELETE /users/me -> 500 when deleteAccount throws', async () => {
+    usersService.deleteAccount.mockRejectedValueOnce(new Error('boom'));
+
+    await request(app.getHttpServer())
+      .delete('/users/me')
+      .expect(500);
   });
 });

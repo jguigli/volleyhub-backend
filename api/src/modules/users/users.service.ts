@@ -339,6 +339,94 @@ export class UsersService {
     return this.sanitize(saved);
   }
 
+  /**
+   * Delete user account and all associated data.
+   * Required by Apple App Store guideline 5.1.1(v).
+   *
+   * Cascade:
+   * - match_participants (user removed from matches)
+   * - matches created by user (cancelled — set creator to NULL is not possible due to NOT NULL constraint)
+   * - follows (both directions)
+   * - follow_requests (both directions)
+   * - match_chat_messages (deleted)
+   * - match_chat_mutes (deleted)
+   * - notifications cache cleared
+   * - user row deleted
+   */
+  async deleteAccount(userId: string): Promise<void> {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    await this.userRepo.manager.transaction(async (mgr) => {
+      // Remove user from all match participations
+      await mgr.query(
+        `DELETE FROM match_participants WHERE user_id = $1`,
+        [userId],
+      );
+
+      // Delete tournament fixtures of matches created by user
+      await mgr.query(
+        `DELETE FROM tournament_fixtures WHERE event_match_id IN (SELECT id FROM matches WHERE creator_id = $1)`,
+        [userId],
+      );
+
+      // Delete chat messages and mutes for matches created by user
+      await mgr.query(
+        `DELETE FROM match_chat_messages WHERE match_id IN (SELECT id FROM matches WHERE creator_id = $1)`,
+        [userId],
+      );
+      await mgr.query(
+        `DELETE FROM match_chat_mutes WHERE match_id IN (SELECT id FROM matches WHERE creator_id = $1)`,
+        [userId],
+      );
+
+      // Delete remaining participants of matches created by user
+      await mgr.query(
+        `DELETE FROM match_participants WHERE match_id IN (SELECT id FROM matches WHERE creator_id = $1)`,
+        [userId],
+      );
+
+      // Delete matches created by user
+      await mgr.query(
+        `DELETE FROM matches WHERE creator_id = $1`,
+        [userId],
+      );
+
+      // Delete user's chat messages in other matches
+      await mgr.query(
+        `DELETE FROM match_chat_messages WHERE user_id = $1`,
+        [userId],
+      );
+
+      // Delete chat mutes involving user
+      await mgr.query(
+        `DELETE FROM match_chat_mutes WHERE muted_user_id = $1`,
+        [userId],
+      );
+
+      // Delete follows in both directions
+      await mgr.query(
+        `DELETE FROM follows WHERE follower_id = $1 OR following_id = $1`,
+        [userId],
+      );
+
+      // Delete follow requests in both directions
+      await mgr.query(
+        `DELETE FROM follow_requests WHERE requester_id = $1 OR target_id = $1`,
+        [userId],
+      );
+
+      // Finally, delete the user
+      await mgr.query(`DELETE FROM users WHERE id = $1`, [userId]);
+    });
+
+    // Clear cache
+    await this.invalidateProfileCache(userId);
+    await this.redisService.delPattern(`user:${userId}:*`);
+    await this.redisService.delPattern(`invites:user:${userId}`);
+    await this.redisService.delPattern('nearby:matches:*');
+  }
+
   private sanitize(user: User): Partial<User> {
     const { passwordHash: _ph, fcmToken: _ft, ...rest } = user;
     return rest;

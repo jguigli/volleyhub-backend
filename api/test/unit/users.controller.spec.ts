@@ -19,6 +19,7 @@ describe('UsersController (unit)', () => {
       acceptFollowRequest: jest.fn().mockResolvedValue(undefined),
       declineFollowRequest: jest.fn().mockResolvedValue(undefined),
       getIncomingFollowRequests: jest.fn().mockResolvedValue([]),
+      deleteAccount: jest.fn().mockResolvedValue(undefined),
     };
 
     controller = new UsersController(usersService as any);
@@ -129,6 +130,26 @@ describe('UsersController (unit)', () => {
       await controller.getIncomingFollowRequests(fakeUser as any);
 
       expect(usersService.getIncomingFollowRequests).toHaveBeenCalledWith('user-1');
+    });
+  });
+
+  describe('deleteMe', () => {
+    it('should call usersService.deleteAccount with current user id', async () => {
+      await controller.deleteMe(fakeUser as any);
+
+      expect(usersService.deleteAccount).toHaveBeenCalledWith('user-1');
+    });
+
+    it('should return success true', async () => {
+      const result = await controller.deleteMe(fakeUser as any);
+
+      expect(result).toEqual({ success: true });
+    });
+
+    it('should propagate errors from usersService.deleteAccount', async () => {
+      usersService.deleteAccount.mockRejectedValue(new Error('User not found'));
+
+      await expect(controller.deleteMe(fakeUser as any)).rejects.toThrow('User not found');
     });
   });
 });

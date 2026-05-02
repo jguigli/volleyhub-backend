@@ -95,4 +95,11 @@ export class UsersController {
   updateMe(@CurrentUser() user: User, @Body() dto: UpdateProfileDto) {
     return this.usersService.updateProfile(user.id, dto);
   }
+
+  @Delete('me')
+  @UseGuards(JwtAuthGuard)
+  async deleteMe(@CurrentUser() user: User) {
+    await this.usersService.deleteAccount(user.id);
+    return { success: true };
+  }
 }
