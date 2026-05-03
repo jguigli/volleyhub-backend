@@ -1010,20 +1010,12 @@ export class MatchesService {
       await this.matchRepo.update(matchId, {
         scheduledAt: new Date(),
       });
-      // For tournaments, seed fixtures and activate the bracket
+      // For tournaments, seed fixtures, activate bracket and apply auto-forfeits
       if (match.eventFormat === EventFormat.TOURNAMENT) {
         const updatedMatch = await this.findById(matchId);
-        const existingFixtures = await this.fixtureRepo.count({ where: { eventMatchId: matchId } });
-        if (existingFixtures === 0 && updatedMatch.teamCount && updatedMatch.tournamentSystem) {
-          await this.seedTournamentFixturesForNewMatch(
-            matchId,
-            updatedMatch.tournamentSystem as TournamentSystem,
-            updatedMatch.teamCount,
-            updatedMatch.tournamentPointsPerMatch ?? 21,
-            updatedMatch.tournamentCourtCount ?? 1,
-          );
+        if (updatedMatch.teamCount && updatedMatch.tournamentSystem) {
+          await this.seedAndLaunchTournamentBracket(updatedMatch);
         }
-        await this.activateTournamentBracket(updatedMatch);
       }
       await this.invalidateNearbyCache();
       const startedMatch = await this.findById(matchId);
@@ -1044,70 +1036,7 @@ export class MatchesService {
         throw new BadRequestException('Tournament not properly configured');
       }
 
-      // Identify empty teams (0 players)
-      const teamPlayerCount = new Map<number, number>();
-      for (let i = 0; i < match.teamCount; i++) {
-        teamPlayerCount.set(i, 0);
-      }
-      for (const p of match.participants) {
-        if (p.teamIndex != null && p.teamIndex >= 0 && p.teamIndex < match.teamCount) {
-          teamPlayerCount.set(p.teamIndex, (teamPlayerCount.get(p.teamIndex) ?? 0) + 1);
-        }
-      }
-      const emptyTeams = new Set<number>();
-      for (const [teamIdx, count] of teamPlayerCount) {
-        if (count === 0) emptyTeams.add(teamIdx);
-      }
-
-      await this.seedTournamentFixturesForNewMatch(
-        matchId,
-        match.tournamentSystem as TournamentSystem,
-        match.teamCount,
-        match.tournamentPointsPerMatch ?? 21,
-        match.tournamentCourtCount ?? 1,
-      );
-      await this.activateTournamentBracket(match);
-
-      // Auto-forfeit empty teams: set their score to 0 and lock it
-      if (emptyTeams.size > 0) {
-        const fixtures = await this.fixtureRepo.find({
-          where: { eventMatchId: matchId },
-        });
-        for (const f of fixtures) {
-          if (f.status !== FixtureStatus.LIVE && f.status !== FixtureStatus.READY) continue;
-          const aEmpty = f.teamAIndex != null && emptyTeams.has(f.teamAIndex);
-          const bEmpty = f.teamBIndex != null && emptyTeams.has(f.teamBIndex);
-
-          if (aEmpty && bEmpty) {
-            // Double forfeit: no winner, match ends immediately
-            f.scoreA = 0;
-            f.scoreB = 0;
-            f.scoreAConfirmed = true;
-            f.scoreBConfirmed = true;
-            f.status = FixtureStatus.FINISHED;
-            f.endedAt = new Date();
-            f.courtIndex = null;
-            // Don't propagate any winner — the next match will have a bye on this slot
-            await this.fixtureRepo.save(f);
-            continue;
-          }
-
-          if (aEmpty) {
-            f.scoreA = 0;
-            f.scoreAConfirmed = true;
-          }
-          if (bEmpty) {
-            f.scoreB = 0;
-            f.scoreBConfirmed = true;
-          }
-          if (aEmpty || bEmpty) {
-            await this.fixtureRepo.save(f);
-          }
-        }
-        // Re-run the engine to resolve walkovers and propagate winners
-        await this.activateTournamentBracket(match);
-      }
-
+      await this.seedAndLaunchTournamentBracket(match);
       await this.invalidateNearbyCache();
       return this.findById(matchId);
     }
@@ -1990,6 +1919,82 @@ export class MatchesService {
     const courts = match.tournamentCourtCount ?? 1;
     await this.tournamentEngine.run(match.id, pts, courts);
     await this.persistTournamentGamesJson(match.id);
+  }
+
+  /**
+   * Seed fixtures, activate bracket, then auto-forfeit any empty teams.
+   * Shared between manual launch (launchBracket) and early start (startNow).
+   */
+  private async seedAndLaunchTournamentBracket(match: Match): Promise<void> {
+    const teamCount = match.teamCount ?? 0;
+    const tournamentSystem = match.tournamentSystem;
+    if (teamCount < 1 || !tournamentSystem) return;
+
+    // Identify empty teams (0 players)
+    const teamPlayerCount = new Map<number, number>();
+    for (let i = 0; i < teamCount; i++) {
+      teamPlayerCount.set(i, 0);
+    }
+    for (const p of match.participants) {
+      if (p.teamIndex != null && p.teamIndex >= 0 && p.teamIndex < teamCount) {
+        teamPlayerCount.set(p.teamIndex, (teamPlayerCount.get(p.teamIndex) ?? 0) + 1);
+      }
+    }
+    const emptyTeams = new Set<number>();
+    for (const [teamIdx, count] of teamPlayerCount) {
+      if (count === 0) emptyTeams.add(teamIdx);
+    }
+
+    const existingFixtures = await this.fixtureRepo.count({ where: { eventMatchId: match.id } });
+    if (existingFixtures === 0) {
+      await this.seedTournamentFixturesForNewMatch(
+        match.id,
+        tournamentSystem as TournamentSystem,
+        teamCount,
+        match.tournamentPointsPerMatch ?? 21,
+        match.tournamentCourtCount ?? 1,
+      );
+    }
+    await this.activateTournamentBracket(match);
+
+    // Auto-forfeit empty teams
+    if (emptyTeams.size > 0) {
+      const fixtures = await this.fixtureRepo.find({
+        where: { eventMatchId: match.id },
+      });
+      for (const f of fixtures) {
+        if (f.status !== FixtureStatus.LIVE && f.status !== FixtureStatus.READY) continue;
+        const aEmpty = f.teamAIndex != null && emptyTeams.has(f.teamAIndex);
+        const bEmpty = f.teamBIndex != null && emptyTeams.has(f.teamBIndex);
+
+        if (aEmpty && bEmpty) {
+          // Double forfeit: no winner, match ends immediately
+          f.scoreA = 0;
+          f.scoreB = 0;
+          f.scoreAConfirmed = true;
+          f.scoreBConfirmed = true;
+          f.status = FixtureStatus.FINISHED;
+          f.endedAt = new Date();
+          f.courtIndex = null;
+          await this.fixtureRepo.save(f);
+          continue;
+        }
+
+        if (aEmpty) {
+          f.scoreA = 0;
+          f.scoreAConfirmed = true;
+        }
+        if (bEmpty) {
+          f.scoreB = 0;
+          f.scoreBConfirmed = true;
+        }
+        if (aEmpty || bEmpty) {
+          await this.fixtureRepo.save(f);
+        }
+      }
+      // Re-run the engine to resolve walkovers and propagate winners
+      await this.activateTournamentBracket(match);
+    }
   }
 
   private async persistTournamentGamesJson(matchId: string): Promise<void> {
