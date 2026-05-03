@@ -69,11 +69,18 @@ describe('AuthService (unit)', () => {
       sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined),
     };
 
+    const contentFilter = {
+      isProfane: jest.fn().mockReturnValue(false),
+      assertClean: jest.fn(),
+      clean: jest.fn((s: string) => s),
+    };
+
     service = new AuthService(
       userRepo as any,
       jwtService as any,
       configService as any,
       emailService as any,
+      contentFilter as any,
     );
   });
 

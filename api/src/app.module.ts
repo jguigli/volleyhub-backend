@@ -10,6 +10,7 @@ import { MatchesModule } from './modules/matches/matches.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { ContentFilterModule } from './common/content-filter/content-filter.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { RedisModule } from './modules/redis/redis.module';
 import appConfig from './config/app.config';
@@ -50,6 +51,7 @@ import databaseConfig from './config/database.config';
     NotificationsModule,
     AdminModule,
     ReportsModule,
+    ContentFilterModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

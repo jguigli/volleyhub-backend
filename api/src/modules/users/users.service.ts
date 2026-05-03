@@ -12,6 +12,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { RedisService } from '../redis/redis.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { BlocksService } from './blocks.service';
+import { ContentFilterService } from '../../common/content-filter/content-filter.service';
 
 export interface PublicProfile {
   id: string;
@@ -46,6 +47,7 @@ export class UsersService {
     private readonly redisService: RedisService,
     private readonly notificationsService: NotificationsService,
     private readonly blocksService: BlocksService,
+    private readonly contentFilter: ContentFilterService,
   ) {}
 
   private profileCacheKey(userId: string): string {
@@ -319,13 +321,18 @@ export class UsersService {
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    if (dto.username !== undefined) user.username = dto.username;
+    if (dto.username !== undefined) {
+      this.contentFilter.assertClean(dto.username, 'Username');
+      user.username = dto.username;
+    }
     if (dto.skillLevel !== undefined) user.skillLevel = dto.skillLevel;
     if (dto.position !== undefined) user.position = dto.position;
     if (dto.club !== undefined) {
+      this.contentFilter.assertClean(dto.club, 'Club');
       user.club = dto.club.trim() ? dto.club.trim() : null;
     }
     if (dto.competition !== undefined) {
+      this.contentFilter.assertClean(dto.competition, 'Competition');
       user.competition = dto.competition.trim() ? dto.competition.trim() : null;
     }
     if (dto.league !== undefined) {
@@ -336,6 +343,7 @@ export class UsersService {
       user.profilePicture = p.length > 0 ? p : null;
     }
     if (dto.bio !== undefined) {
+      this.contentFilter.assertClean(dto.bio, 'Bio');
       user.bio = dto.bio.trim() ? dto.bio.trim() : null;
     }
     if (dto.fcmToken !== undefined) user.fcmToken = dto.fcmToken;

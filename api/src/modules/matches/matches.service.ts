@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { EventFormat, TournamentSystem, VolleyType } from '../../common/enums';
+import { ContentFilterService } from '../../common/content-filter/content-filter.service';
 import { UpdateMatchManageDto } from './dto/update-match-manage.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -65,6 +66,7 @@ export class MatchesService {
     private readonly tournamentEngine: TournamentEngineService,
     @Inject(forwardRef(() => MatchesGateway))
     private readonly matchesGateway: MatchesGateway,
+    private readonly contentFilter: ContentFilterService,
   ) {}
 
   private allowedMaxPlayersForVolley(volley: VolleyType): Set<number> {
@@ -193,7 +195,12 @@ export class MatchesService {
       tournamentPointsPerMatch,
       tournamentCourtCount,
       tournamentSystem,
-      description: dto.description ?? null,
+      description: (() => {
+        if (dto.description != null) {
+          this.contentFilter.assertClean(dto.description, 'Description');
+        }
+        return dto.description ?? null;
+      })(),
     });
 
     const saved = await this.matchRepo.save(match);

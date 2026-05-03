@@ -14,6 +14,7 @@ import { User } from '../users/user.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { EmailService } from '../email/email.service';
+import { ContentFilterService } from '../../common/content-filter/content-filter.service';
 
 @Injectable()
 export class AuthService {
@@ -26,6 +27,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
     private readonly emailService: EmailService,
+    private readonly contentFilter: ContentFilterService,
   ) {
     this.bcryptRounds = this.config.get<number>('app.bcryptRounds') ?? 12;
     this.refreshExpiresIn =
@@ -35,6 +37,7 @@ export class AuthService {
   async register(
     dto: RegisterDto,
   ): Promise<{ accessToken: string; refreshToken: string; user: Partial<User> }> {
+    this.contentFilter.assertClean(dto.username, 'Username');
     // Case-insensitive check on both email and username
     const existing = await this.userRepo.findOne({
       where: [

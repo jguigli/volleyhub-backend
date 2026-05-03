@@ -14,6 +14,7 @@ import { MatchesService } from './matches.service';
 import { MatchesGateway } from './matches.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
 import { BlocksService } from '../users/blocks.service';
+import { ContentFilterService } from '../../common/content-filter/content-filter.service';
 
 const CHAT_PAGE = 50;
 
@@ -29,6 +30,7 @@ export class MatchChatService {
     private readonly matchesGateway: MatchesGateway,
     private readonly notificationsService: NotificationsService,
     private readonly blocksService: BlocksService,
+    private readonly contentFilter: ContentFilterService,
   ) {}
 
   async assertParticipant(matchId: string, userId: string): Promise<void> {
@@ -100,6 +102,7 @@ export class MatchChatService {
     if (!trimmed) {
       throw new BadRequestException('Message cannot be empty');
     }
+    this.contentFilter.assertClean(trimmed, 'Message');
 
     const msg = this.messageRepo.create({
       matchId,
