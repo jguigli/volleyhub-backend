@@ -59,7 +59,7 @@ const translations: Record<string, Record<string, (...args: string[]) => PushTex
       body: `${username} a quitté ton événement.`,
     }),
     event_reminder_30min: () => ({
-      title: 'Bientôt !',
+      title: 'Prêt à jouer ?',
       body: 'Ton événement commence dans 30 minutes.',
     }),
     chat_message: (username) => ({
@@ -130,7 +130,7 @@ const translations: Record<string, Record<string, (...args: string[]) => PushTex
       body: `${username} left your event.`,
     }),
     event_reminder_30min: () => ({
-      title: 'Starting soon!',
+      title: 'Ready to play?',
       body: 'Your event starts in 30 minutes.',
     }),
     chat_message: (username) => ({
