@@ -15,6 +15,7 @@ import { RedisModule } from '../redis/redis.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { AuthModule } from '../auth/auth.module';
 import { User } from '../users/user.entity';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { User } from '../users/user.entity';
     RedisModule,
     NotificationsModule,
     AuthModule,
+    UsersModule,
   ],
   controllers: [MatchesController],
   providers: [

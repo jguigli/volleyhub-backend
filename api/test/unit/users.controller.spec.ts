@@ -3,6 +3,7 @@ import { UsersController } from '../../src/modules/users/users.controller';
 describe('UsersController (unit)', () => {
   let controller: UsersController;
   let usersService: Record<string, jest.Mock>;
+  let blocksService: Record<string, jest.Mock>;
 
   const fakeUser = { id: 'user-1', username: 'player1' };
 
@@ -21,8 +22,13 @@ describe('UsersController (unit)', () => {
       getIncomingFollowRequests: jest.fn().mockResolvedValue([]),
       deleteAccount: jest.fn().mockResolvedValue(undefined),
     };
+    blocksService = {
+      block: jest.fn().mockResolvedValue(undefined),
+      unblock: jest.fn().mockResolvedValue(undefined),
+      listBlocked: jest.fn().mockResolvedValue([{ id: 'blocked-1', username: 'blocked' }]),
+    };
 
-    controller = new UsersController(usersService as any);
+    controller = new UsersController(usersService as any, blocksService as any);
   });
 
   describe('getPublicProfile', () => {
@@ -130,6 +136,37 @@ describe('UsersController (unit)', () => {
       await controller.getIncomingFollowRequests(fakeUser as any);
 
       expect(usersService.getIncomingFollowRequests).toHaveBeenCalledWith('user-1');
+    });
+  });
+
+  describe('listBlocks', () => {
+    it('should call blocksService.listBlocked with current user id', async () => {
+      const result = await controller.listBlocks(fakeUser as any);
+      expect(blocksService.listBlocked).toHaveBeenCalledWith('user-1');
+      expect(result).toEqual([{ id: 'blocked-1', username: 'blocked' }]);
+    });
+  });
+
+  describe('blockUser', () => {
+    it('should call blocksService.block with current user id and target id', async () => {
+      const result = await controller.blockUser('target-9', fakeUser as any);
+      expect(blocksService.block).toHaveBeenCalledWith('user-1', 'target-9');
+      expect(result).toEqual({ success: true });
+    });
+
+    it('should propagate errors from blocksService.block', async () => {
+      blocksService.block.mockRejectedValue(new Error('Cannot block yourself'));
+      await expect(controller.blockUser('target-9', fakeUser as any)).rejects.toThrow(
+        'Cannot block yourself',
+      );
+    });
+  });
+
+  describe('unblockUser', () => {
+    it('should call blocksService.unblock with current user id and target id', async () => {
+      const result = await controller.unblockUser('target-9', fakeUser as any);
+      expect(blocksService.unblock).toHaveBeenCalledWith('user-1', 'target-9');
+      expect(result).toEqual({ success: true });
     });
   });
 

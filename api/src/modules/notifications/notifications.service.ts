@@ -361,10 +361,17 @@ export class NotificationsService implements OnModuleInit {
     }, 'event_reminder_30min');
   }
 
-  async notifyChatMessage(matchId: string, senderUserId: string, senderUsername: string): Promise<void> {
+  async notifyChatMessage(
+    matchId: string,
+    senderUserId: string,
+    senderUsername: string,
+    excludeUserIds: string[] = [],
+  ): Promise<void> {
     const ids = await this.getParticipantIds(matchId, senderUserId);
-    if (ids.length === 0) return;
-    await this.storeAndPushToMany(ids, {
+    const exclude = new Set(excludeUserIds);
+    const filtered = ids.filter((id) => !exclude.has(id));
+    if (filtered.length === 0) return;
+    await this.storeAndPushToMany(filtered, {
       id: randomUUID(),
       type: 'chat_message',
       matchId,

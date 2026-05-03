@@ -39,6 +39,9 @@ export class MatchesGateway
 
   private readonly logger = new Logger(MatchesGateway.name);
 
+  /** userId -> set of socketIds for that user (multiple devices possible) */
+  private readonly userSockets = new Map<string, Set<string>>();
+
   constructor(
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
@@ -61,6 +64,10 @@ export class MatchesGateway
       });
 
       client.userId = payload.sub;
+      // Track this socket for the user (selective emit / block filtering)
+      const set = this.userSockets.get(client.userId) ?? new Set<string>();
+      set.add(client.id);
+      this.userSockets.set(client.userId, set);
       this.logger.log(`Client connected: ${client.id} (user: ${client.userId})`);
     } catch {
       this.logger.warn(`Unauthorized connection attempt: ${client.id}`);
@@ -69,6 +76,13 @@ export class MatchesGateway
   }
 
   handleDisconnect(client: AuthenticatedSocket): void {
+    if (client.userId) {
+      const set = this.userSockets.get(client.userId);
+      if (set) {
+        set.delete(client.id);
+        if (set.size === 0) this.userSockets.delete(client.userId);
+      }
+    }
     this.logger.log(`Client disconnected: ${client.id}`);
   }
 
@@ -179,7 +193,23 @@ export class MatchesGateway
   broadcastChatMessage(
     matchId: string,
     payload: Record<string, unknown>,
+    excludeUserIds: string[] = [],
   ): void {
-    this.server.to(`match:${matchId}`).emit('match_chat_message', payload);
+    if (excludeUserIds.length === 0) {
+      this.server.to(`match:${matchId}`).emit('match_chat_message', payload);
+      return;
+    }
+    // Selective emit: send to the match room except sockets belonging to excluded users
+    const excludedSocketIds: string[] = [];
+    for (const uid of excludeUserIds) {
+      const sockets = this.userSockets.get(uid);
+      if (sockets) {
+        for (const sid of sockets) excludedSocketIds.push(sid);
+      }
+    }
+    this.server
+      .to(`match:${matchId}`)
+      .except(excludedSocketIds)
+      .emit('match_chat_message', payload);
   }
 }

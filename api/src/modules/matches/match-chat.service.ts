@@ -13,6 +13,7 @@ import { MatchChatMute } from './match-chat-mute.entity';
 import { MatchesService } from './matches.service';
 import { MatchesGateway } from './matches.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
+import { BlocksService } from '../users/blocks.service';
 
 const CHAT_PAGE = 50;
 
@@ -27,6 +28,7 @@ export class MatchChatService {
     @Inject(forwardRef(() => MatchesGateway))
     private readonly matchesGateway: MatchesGateway,
     private readonly notificationsService: NotificationsService,
+    private readonly blocksService: BlocksService,
   ) {}
 
   async assertParticipant(matchId: string, userId: string): Promise<void> {
@@ -68,8 +70,12 @@ export class MatchChatService {
     const hasMore = rows.length > CHAT_PAGE;
     const slice = hasMore ? rows.slice(0, CHAT_PAGE) : rows;
 
+    // Filter out messages from users who blocked or are blocked by the viewer
+    const blockedIds = await this.blocksService.getBlockedAndBlockerIds(viewerId);
+    const filtered = slice.filter((msg) => !blockedIds.has(msg.userId));
+
     return {
-      messages: slice.reverse().map((msg) => ({
+      messages: filtered.reverse().map((msg) => ({
         id: msg.id,
         matchId: msg.matchId,
         userId: msg.userId,
@@ -122,13 +128,20 @@ export class MatchChatService {
       },
     };
 
-    this.matchesGateway.broadcastChatMessage(matchId, payload);
+    // Compute the set of users who must NOT receive this message
+    // (users who blocked the sender or whom the sender blocked).
+    const blockedSet = await this.blocksService.getBlockedAndBlockerIds(userId);
+    const excludeUserIds = Array.from(blockedSet);
 
-    // Push notification to other participants (fire-and-forget)
+    this.matchesGateway.broadcastChatMessage(matchId, payload, excludeUserIds);
+
+    // Push notification to other participants (fire-and-forget),
+    // skipping the same blocked-related users.
     void this.notificationsService.notifyChatMessage(
       matchId,
       userId,
       payload.user.username,
+      excludeUserIds,
     );
 
     return payload;

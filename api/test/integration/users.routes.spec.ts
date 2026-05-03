@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { UsersController } from '../../src/modules/users/users.controller';
 import { UsersService } from '../../src/modules/users/users.service';
+import { BlocksService } from '../../src/modules/users/blocks.service';
 import { JwtAuthGuard } from '../../src/common/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../../src/common/guards/optional-jwt-auth.guard';
 
@@ -22,6 +23,11 @@ describe('Users routes (integration)', () => {
     updateProfile: jest.fn().mockResolvedValue({ id: 'u-auth', bio: 'Updated' }),
     deleteAccount: jest.fn().mockResolvedValue(undefined),
   };
+  const blocksService = {
+    listBlocked: jest.fn().mockResolvedValue([{ id: 'b1', username: 'troll' }]),
+    block: jest.fn().mockResolvedValue(undefined),
+    unblock: jest.fn().mockResolvedValue(undefined),
+  };
 
   const authGuard: CanActivate = {
     canActivate: (ctx: ExecutionContext) => {
@@ -34,7 +40,10 @@ describe('Users routes (integration)', () => {
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [UsersController],
-      providers: [{ provide: UsersService, useValue: usersService }],
+      providers: [
+        { provide: UsersService, useValue: usersService },
+        { provide: BlocksService, useValue: blocksService },
+      ],
     })
       .overrideGuard(JwtAuthGuard)
       .useValue(authGuard)
@@ -168,5 +177,33 @@ describe('Users routes (integration)', () => {
     await request(app.getHttpServer())
       .delete('/users/me')
       .expect(500);
+  });
+
+  it('GET /users/me/blocks -> 200, calls blocksService.listBlocked(authUser)', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/users/me/blocks')
+      .expect(200);
+
+    expect(blocksService.listBlocked).toHaveBeenCalledWith('u-auth');
+    expect(res.body).toEqual([{ id: 'b1', username: 'troll' }]);
+  });
+
+  it('POST /users/:id/block -> 201, calls blocksService.block(authUser, id)', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/users/u2/block')
+      .send({})
+      .expect(201);
+
+    expect(blocksService.block).toHaveBeenCalledWith('u-auth', 'u2');
+    expect(res.body).toEqual({ success: true });
+  });
+
+  it('DELETE /users/:id/block -> 200, calls blocksService.unblock(authUser, id)', async () => {
+    const res = await request(app.getHttpServer())
+      .delete('/users/u2/block')
+      .expect(200);
+
+    expect(blocksService.unblock).toHaveBeenCalledWith('u-auth', 'u2');
+    expect(res.body).toEqual({ success: true });
   });
 });

@@ -11,6 +11,7 @@ import { FollowRequest } from './follow-request.entity';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { RedisService } from '../redis/redis.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { BlocksService } from './blocks.service';
 
 export interface PublicProfile {
   id: string;
@@ -44,6 +45,7 @@ export class UsersService {
     private readonly followRequestRepo: Repository<FollowRequest>,
     private readonly redisService: RedisService,
     private readonly notificationsService: NotificationsService,
+    private readonly blocksService: BlocksService,
   ) {}
 
   private profileCacheKey(userId: string): string {
@@ -74,6 +76,7 @@ export class UsersService {
     }
     // Escape LIKE wildcards to prevent injection of % or _
     const safe = trimmed.replace(/[%_\\]/g, (c) => `\\${c}`);
+    const blockedIds = await this.blocksService.getBlockedAndBlockerIds(currentUserId);
     const users = await this.userRepo.find({
       where: {
         username: ILike(`%${safe}%`),
@@ -83,7 +86,9 @@ export class UsersService {
       take: 20,
       order: { username: 'ASC' },
     });
-    return users.map((u) => ({
+    return users
+      .filter((u) => !blockedIds.has(u.id))
+      .map((u) => ({
       id: u.id,
       username: u.username,
       skillLevel: u.skillLevel,
@@ -103,6 +108,12 @@ export class UsersService {
     id: string,
     requesterId?: string,
   ): Promise<PublicProfile | PublicProfileWithStatus> {
+    // Hide profile if requester and target have blocked each other
+    if (requesterId) {
+      const blocked = await this.blocksService.isEitherBlocked(requesterId, id);
+      if (blocked) throw new NotFoundException('User not found');
+    }
+
     // Cache base profile (without requester-specific fields)
     const cacheKey = this.profileCacheKey(id);
     let base = await this.redisService.getJson<PublicProfile>(cacheKey);
@@ -203,6 +214,9 @@ export class UsersService {
     }
     const target = await this.userRepo.findOne({ where: { id: targetId } });
     if (!target) throw new NotFoundException('User not found');
+
+    const blocked = await this.blocksService.isEitherBlocked(requesterId, targetId);
+    if (blocked) throw new NotFoundException('User not found');
 
     const alreadyFollowing = await this.followRepo.findOne({
       where: { followerId: requesterId, followingId: targetId },
@@ -407,6 +421,18 @@ export class UsersService {
       // Delete follows in both directions
       await mgr.query(
         `DELETE FROM follows WHERE follower_id = $1 OR following_id = $1`,
+        [userId],
+      );
+
+      // Delete user blocks in both directions
+      await mgr.query(
+        `DELETE FROM user_blocks WHERE blocker_id = $1 OR blocked_id = $1`,
+        [userId],
+      );
+
+      // Delete reports authored by user (target reports survive for moderation)
+      await mgr.query(
+        `DELETE FROM reports WHERE reporter_id = $1`,
         [userId],
       );
 

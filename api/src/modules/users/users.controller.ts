@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
+import { BlocksService } from './blocks.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
@@ -19,7 +20,30 @@ import { User } from './user.entity';
 
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly blocksService: BlocksService,
+  ) {}
+
+  @Get('me/blocks')
+  @UseGuards(JwtAuthGuard)
+  listBlocks(@CurrentUser() user: User) {
+    return this.blocksService.listBlocked(user.id);
+  }
+
+  @Post(':id/block')
+  @UseGuards(JwtAuthGuard)
+  async blockUser(@Param('id') targetId: string, @CurrentUser() user: User) {
+    await this.blocksService.block(user.id, targetId);
+    return { success: true };
+  }
+
+  @Delete(':id/block')
+  @UseGuards(JwtAuthGuard)
+  async unblockUser(@Param('id') targetId: string, @CurrentUser() user: User) {
+    await this.blocksService.unblock(user.id, targetId);
+    return { success: true };
+  }
 
   @Get('me/incoming-follow-requests')
   @UseGuards(JwtAuthGuard)
