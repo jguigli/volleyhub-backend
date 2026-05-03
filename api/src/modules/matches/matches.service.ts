@@ -212,21 +212,10 @@ export class MatchesService {
 
     await this.invalidateNearbyCache();
 
-    if (
-      format === EventFormat.TOURNAMENT &&
-      tournamentSystem != null &&
-      teamCount != null &&
-      tournamentPointsPerMatch != null &&
-      tournamentCourtCount != null
-    ) {
-      await this.seedTournamentFixturesForNewMatch(
-        saved.id,
-        tournamentSystem,
-        teamCount,
-        tournamentPointsPerMatch,
-        tournamentCourtCount,
-      );
-    }
+    // Tournament fixtures are NOT pre-seeded at creation. They are created when
+    // the organizer launches the bracket (via PATCH /matches/:id/manage with launchBracket=true).
+    // This keeps tournamentGames empty until launch, allowing the UI to show the
+    // "Launch tournament" button and keep teams unlocked.
 
     const created = await this.findById(saved.id);
     if (format === EventFormat.TOURNAMENT) {
