@@ -175,11 +175,16 @@ export class MatchesGateway
     @ConnectedSocket() client: AuthenticatedSocket,
   ): Promise<void> {
     await client.join(`match:${payload.matchId}`);
-    const count = await this.matchesService.getPlayerCount(payload.matchId);
-    client.emit('match_updated', {
-      matchId: payload.matchId,
-      currentPlayers: count,
-    });
+    try {
+      const count = await this.matchesService.getPlayerCount(payload.matchId);
+      client.emit('match_updated', {
+        matchId: payload.matchId,
+        currentPlayers: count,
+      });
+    } catch {
+      // Match was deleted between subscription and fetch — ignore silently.
+      // The client will get the up-to-date list on next refetch.
+    }
   }
 
   broadcastMatchUpdate(
