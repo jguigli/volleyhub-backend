@@ -28,6 +28,7 @@
     "seed:tournament-one-empty": "ts-node src/database/seed-tournament-one-empty.ts",
     "seed:screenshots": "ts-node src/database/seed-screenshots.ts",
     "seed:block-report": "ts-node src/database/seed-block-report.ts",
+    "seed:apple": "ts-node src/database/seed-apple-review.ts",
     "typeorm": "typeorm-ts-node-commonjs",
     "migration:generate": "npm run typeorm -- migration:generate -d src/data-source.ts",
     "migration:create": "npm run typeorm -- migration:create",
