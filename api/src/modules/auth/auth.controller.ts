@@ -11,7 +11,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
-  @Throttle({ default: { limit: 5, ttl: 3600000 } })
+  @Throttle({ default: { limit: 10, ttl: 3600000 } })
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }
@@ -30,7 +30,7 @@ export class AuthController {
 
   @Post('request-password-reset')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Throttle({ default: { limit: 3, ttl: 3600000 } })
+  @Throttle({ default: { limit: 5, ttl: 3600000 } })
   async requestPasswordReset(
     @Body() dto: RequestPasswordResetDto,
   ): Promise<void> {
@@ -39,7 +39,7 @@ export class AuthController {
 
   @Post('reset-password')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Throttle({ default: { limit: 5, ttl: 3600000 } })
+  @Throttle({ default: { limit: 10, ttl: 3600000 } })
   async resetPassword(@Body() dto: ResetPasswordDto): Promise<void> {
     await this.authService.resetPassword(dto.email, dto.code, dto.newPassword);
   }

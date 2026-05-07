@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { UserAwareThrottlerGuard } from './common/guards/user-aware-throttler.guard';
 import { APP_GUARD } from '@nestjs/core';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
@@ -40,7 +41,7 @@ import databaseConfig from './config/database.config';
       },
     }),
     ThrottlerModule.forRoot([
-      { name: 'default', ttl: 60000, limit: 100 },
+      { name: 'default', ttl: 60000, limit: 200 },
     ]),
     ScheduleModule.forRoot(),
     RedisModule,
@@ -54,7 +55,7 @@ import databaseConfig from './config/database.config';
     ContentFilterModule,
   ],
   providers: [
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: UserAwareThrottlerGuard },
   ],
 })
 export class AppModule {}
