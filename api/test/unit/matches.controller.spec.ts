@@ -29,6 +29,11 @@ describe('MatchesController (unit)', () => {
       submitFixtureScore: jest.fn().mockResolvedValue(undefined),
       confirmFixtureScore: jest.fn().mockResolvedValue(undefined),
       organizerOverrideFixtureScore: jest.fn().mockResolvedValue(undefined),
+      getMatchLockPreview: jest.fn().mockResolvedValue({
+        canLock: true,
+        needsAssignment: false,
+        warnings: { teamAEmpty: false, teamBEmpty: false, unassignedCount: 0, unassignedUserIds: [] },
+      }),
     };
 
     matchChatService = {
@@ -298,6 +303,28 @@ describe('MatchesController (unit)', () => {
       await controller.muteChatUser('m-1', fakeUser as any, dto as any);
 
       expect(matchChatService.muteUser).toHaveBeenCalledWith('m-1', 'user-1', 'muted-user');
+    });
+  });
+
+  describe('getLockPreview', () => {
+    it('delegates to matchesService.getMatchLockPreview with id and current user id', async () => {
+      const result = await controller.getLockPreview('m-42', fakeUser as any);
+      expect(matchesService.getMatchLockPreview).toHaveBeenCalledWith('m-42', 'user-1');
+      expect(result).toEqual({
+        canLock: true,
+        needsAssignment: false,
+        warnings: {
+          teamAEmpty: false,
+          teamBEmpty: false,
+          unassignedCount: 0,
+          unassignedUserIds: [],
+        },
+      });
+    });
+
+    it('propagates errors from the service', async () => {
+      matchesService.getMatchLockPreview.mockRejectedValue(new Error('Forbidden'));
+      await expect(controller.getLockPreview('m-42', fakeUser as any)).rejects.toThrow('Forbidden');
     });
   });
 

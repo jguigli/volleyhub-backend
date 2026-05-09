@@ -247,31 +247,6 @@ export class MatchesService {
       throw new NotFoundException('Match not found');
     }
 
-    // Auto-cancel match events when going live with an empty team
-    // Skip if match was created less than 5 minutes ago (avoids cancelling on creation)
-    const GRACE_PERIOD_MS = 5 * 60 * 1000;
-    const matchAge = Date.now() - new Date(match.createdAt).getTime();
-    if (
-      match.eventFormat === EventFormat.MATCH &&
-      match.status !== MatchStatus.COMPLETED &&
-      match.status !== MatchStatus.CANCELLED &&
-      matchAge > GRACE_PERIOD_MS &&
-      new Date(match.scheduledAt).getTime() <= Date.now()
-    ) {
-      const teamA = match.participants.filter((p) => p.teamIndex === 0);
-      const teamB = match.participants.filter((p) => p.teamIndex === 1);
-      if (teamA.length === 0 || teamB.length === 0) {
-        const flagKey = `auto-cancel:notified:${id}`;
-        const already = await this.redisService.get(flagKey);
-        await this.matchRepo.update(id, { status: MatchStatus.COMPLETED });
-        match.status = MatchStatus.COMPLETED;
-        if (!already) {
-          await this.redisService.set(flagKey, '1', 86400);
-          this.notificationsService.notifyEventCancelledNotEnoughPlayers(match).catch(() => {});
-        }
-      }
-    }
-
     await this.attachCourtLatLng(match);
     await this.attachTournamentData(match);
     return match;
@@ -1095,6 +1070,8 @@ export class MatchesService {
             { matchId, userId: assignUserId },
             { teamIndex: idx === null ? null : idx },
           );
+          const inMemory = match.participants.find((p) => p.userId === assignUserId);
+          if (inMemory) inMemory.teamIndex = idx === null ? null : idx;
         }
       } else {
         for (const [assignUserId, idx] of Object.entries(dto.teamAssignments)) {
@@ -1110,6 +1087,8 @@ export class MatchesService {
             { matchId, userId: assignUserId },
             { teamIndex: idx === null ? null : idx },
           );
+          const inMemory = match.participants.find((p) => p.userId === assignUserId);
+          if (inMemory) inMemory.teamIndex = idx === null ? null : idx;
         }
       }
     }
@@ -1185,6 +1164,17 @@ export class MatchesService {
         match.teamAScore = winsA;
         match.teamBScore = winsB;
         const hasWinner = winsA >= setsToWin || winsB >= setsToWin;
+        if (hasWinner) {
+          // Refuse to complete the match if there are not at least 2 players
+          // assigned to teams (prevents abuse: a solo creator validating fake wins).
+          const teamA = match.participants.filter((p) => p.teamIndex === 0);
+          const teamB = match.participants.filter((p) => p.teamIndex === 1);
+          if (teamA.length + teamB.length < 2) {
+            throw new BadRequestException(
+              'Cannot complete the match: at least 2 players must be assigned to teams',
+            );
+          }
+        }
         match.status = hasWinner
           ? MatchStatus.COMPLETED
           : this.statusByCapacity(match);
@@ -1627,23 +1617,21 @@ export class MatchesService {
       throw new BadRequestException('Match is cancelled');
     }
 
-    // Block team changes once the event has started
-    // For matches: locked when scheduledAt is reached
-    // For tournaments: locked only when bracket is launched (fixtures exist)
-    const isLive =
-      match.status !== MatchStatus.COMPLETED &&
-      new Date(match.scheduledAt).getTime() <= Date.now();
-    if (isLive && teamIndex !== null) {
-      if (match.eventFormat === EventFormat.TOURNAMENT) {
-        const fixtureCount = await this.fixtureRepo.count({ where: { eventMatchId: matchId } });
-        if (fixtureCount > 0) {
-          throw new BadRequestException(
-            'Teams are locked after the tournament bracket has been launched',
-          );
-        }
-      } else {
+    // Block team changes only once the match is completed (final score locked)
+    // or when the tournament bracket has been launched.
+    if (match.status === MatchStatus.COMPLETED && teamIndex !== null) {
+      throw new BadRequestException(
+        'Teams are locked: the match is completed',
+      );
+    }
+    if (
+      match.eventFormat === EventFormat.TOURNAMENT &&
+      teamIndex !== null
+    ) {
+      const fixtureCount = await this.fixtureRepo.count({ where: { eventMatchId: matchId } });
+      if (fixtureCount > 0) {
         throw new BadRequestException(
-          'Teams are locked while the event is in progress',
+          'Teams are locked after the tournament bracket has been launched',
         );
       }
     }
@@ -1724,6 +1712,58 @@ export class MatchesService {
     });
 
     return updated;
+  }
+
+  /**
+   * Returns information needed by the organizer before locking a match's final score.
+   *
+   *  - canLock          : at least 2 players are assigned to teams (A + B >= 2)
+   *  - needsAssignment  : not enough players in teams, but unassigned players could fix that
+   *  - warnings         : situations that should be flagged but don't block (empty team,
+   *                       unassigned players that the organizer may want to assign)
+   */
+  async getMatchLockPreview(
+    matchId: string,
+    requesterId: string,
+  ): Promise<{
+    canLock: boolean;
+    needsAssignment: boolean;
+    warnings: {
+      teamAEmpty: boolean;
+      teamBEmpty: boolean;
+      unassignedCount: number;
+      unassignedUserIds: string[];
+    };
+  }> {
+    const match = await this.findById(matchId);
+    if (match.eventFormat === EventFormat.TOURNAMENT) {
+      throw new BadRequestException('Lock preview is only for standard matches');
+    }
+    if (match.creatorId !== requesterId) {
+      throw new ForbiddenException('Only the organizer can preview the match lock');
+    }
+
+    const teamA = match.participants.filter((p) => p.teamIndex === 0);
+    const teamB = match.participants.filter((p) => p.teamIndex === 1);
+    const unassigned = match.participants.filter((p) => p.teamIndex == null);
+
+    const playersInTeams = teamA.length + teamB.length;
+    const canLock = playersInTeams >= 2;
+    // If we don't have enough players in teams, can the organizer still reach >= 2
+    // by moving unassigned players?
+    const needsAssignment =
+      !canLock && playersInTeams + unassigned.length >= 2;
+
+    return {
+      canLock,
+      needsAssignment,
+      warnings: {
+        teamAEmpty: teamA.length === 0,
+        teamBEmpty: teamB.length === 0,
+        unassignedCount: unassigned.length,
+        unassignedUserIds: unassigned.map((p) => p.userId),
+      },
+    };
   }
 
   /**

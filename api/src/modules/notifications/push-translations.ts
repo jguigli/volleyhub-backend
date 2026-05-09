@@ -66,10 +66,6 @@ const translations: Record<string, Record<string, (...args: string[]) => PushTex
       title: 'Nouveau message',
       body: `${username} a envoyé un message dans le chat.`,
     }),
-    event_cancelled_not_enough_players: () => ({
-      title: 'Événement terminé',
-      body: 'L\'événement s\'est terminé faute de joueurs dans chaque équipe.',
-    }),
   },
 
   en: {
@@ -136,10 +132,6 @@ const translations: Record<string, Record<string, (...args: string[]) => PushTex
     chat_message: (username) => ({
       title: 'New message',
       body: `${username} sent a message in the group chat.`,
-    }),
-    event_cancelled_not_enough_players: () => ({
-      title: 'Event ended',
-      body: 'The event ended because there were not enough players in each team.',
     }),
   },
 };

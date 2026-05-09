@@ -39,8 +39,8 @@ async function purgeSeed(): Promise<void> {
     `DELETE FROM match_participants mp
      USING matches m
      WHERE mp.match_id = m.id
-       AND (m.description LIKE $1 OR m.description LIKE $2 OR m.description LIKE $3 OR m.description LIKE $4 OR m.description LIKE $5)`,
-    [`${SEED_TAG}%`, '[SEED]%', '[SCREENSHOT]%', '[BLOCKREPORT]%', '[APPLE]%'],
+       AND (m.description LIKE $1 OR m.description LIKE $2 OR m.description LIKE $3 OR m.description LIKE $4 OR m.description LIKE $5 OR m.description LIKE $6)`,
+    [`${SEED_TAG}%`, '[SEED]%', '[SCREENSHOT]%', '[BLOCKREPORT]%', '[APPLE]%', '[LOCK]%'],
   );
 
   // Delete tournament fixtures of seeded matches
@@ -48,8 +48,8 @@ async function purgeSeed(): Promise<void> {
     `DELETE FROM tournament_fixtures tf
      USING matches m
      WHERE tf.event_match_id = m.id
-       AND (m.description LIKE $1 OR m.description LIKE $2 OR m.description LIKE $3 OR m.description LIKE $4 OR m.description LIKE $5)`,
-    [`${SEED_TAG}%`, '[SEED]%', '[SCREENSHOT]%', '[BLOCKREPORT]%', '[APPLE]%'],
+       AND (m.description LIKE $1 OR m.description LIKE $2 OR m.description LIKE $3 OR m.description LIKE $4 OR m.description LIKE $5 OR m.description LIKE $6)`,
+    [`${SEED_TAG}%`, '[SEED]%', '[SCREENSHOT]%', '[BLOCKREPORT]%', '[APPLE]%', '[LOCK]%'],
   );
 
   // Delete tournament fixtures of matches created by seeded users
@@ -80,8 +80,8 @@ async function purgeSeed(): Promise<void> {
 
   // Delete matches by description tag
   await dataSource.query(
-    `DELETE FROM matches WHERE description LIKE $1 OR description LIKE $2 OR description LIKE $3 OR description LIKE $4 OR description LIKE $5`,
-    [`${SEED_TAG}%`, '[SEED]%', '[SCREENSHOT]%', '[BLOCKREPORT]%', '[APPLE]%'],
+    `DELETE FROM matches WHERE description LIKE $1 OR description LIKE $2 OR description LIKE $3 OR description LIKE $4 OR description LIKE $5 OR description LIKE $6`,
+    [`${SEED_TAG}%`, '[SEED]%', '[SCREENSHOT]%', '[BLOCKREPORT]%', '[APPLE]%', '[LOCK]%'],
   );
 
   // Also delete screenshot matches (created by main user)

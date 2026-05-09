@@ -132,6 +132,12 @@ export class MatchesController {
     return this.matchChatService.listMutedUserIds(matchId, user.id);
   }
 
+  @Get(':id/lock-preview')
+  @UseGuards(JwtAuthGuard)
+  getLockPreview(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.matchesService.getMatchLockPreview(id, user.id);
+  }
+
   @Get(':id')
   findById(@Param('id') id: string) {
     return this.matchesService.findById(id);

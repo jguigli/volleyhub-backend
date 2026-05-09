@@ -32,6 +32,11 @@ describe('Matches routes (integration)', () => {
     submitFixtureScore: jest.fn().mockResolvedValue({ id: 'f1' }),
     confirmFixtureScore: jest.fn().mockResolvedValue({ id: 'f1' }),
     organizerOverrideFixtureScore: jest.fn().mockResolvedValue({ id: 'f1' }),
+    getMatchLockPreview: jest.fn().mockResolvedValue({
+      canLock: true,
+      needsAssignment: false,
+      warnings: { teamAEmpty: false, teamBEmpty: false, unassignedCount: 0, unassignedUserIds: [] },
+    }),
   };
 
   const matchChatService = {
@@ -126,6 +131,31 @@ describe('Matches routes (integration)', () => {
       .expect(200);
 
     expect(matchesService.getUserMatchStatsByFormat).toHaveBeenCalledWith('u2', undefined);
+  });
+
+  it('GET /matches/:id/lock-preview -> 200 (auth), calls getMatchLockPreview', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/matches/m1/lock-preview')
+      .expect(200);
+
+    expect(matchesService.getMatchLockPreview).toHaveBeenCalledWith('m1', 'u-auth');
+    expect(res.body).toEqual({
+      canLock: true,
+      needsAssignment: false,
+      warnings: {
+        teamAEmpty: false,
+        teamBEmpty: false,
+        unassignedCount: 0,
+        unassignedUserIds: [],
+      },
+    });
+  });
+
+  it('GET /matches/:id/lock-preview -> 500 when service throws', async () => {
+    matchesService.getMatchLockPreview.mockRejectedValueOnce(new Error('boom'));
+    await request(app.getHttpServer())
+      .get('/matches/m1/lock-preview')
+      .expect(500);
   });
 
   it('GET /matches/:id -> 200, calls findById', async () => {
