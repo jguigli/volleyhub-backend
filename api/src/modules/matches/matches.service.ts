@@ -304,6 +304,7 @@ export class MatchesService {
       JOIN courts c ON c.id = m.court_id
       JOIN users u ON u.id = m.creator_id
       WHERE m.status IN ('open', 'full')
+        AND m.scheduled_at >= NOW() - INTERVAL '24 hours'
     `;
 
     const params: (string | number)[] = [];
