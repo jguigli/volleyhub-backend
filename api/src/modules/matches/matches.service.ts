@@ -294,6 +294,7 @@ export class MatchesService {
              m.tournament_points_per_match AS tournament_points_per_match,
              c.id AS court_id, c.name AS court_name, c.type AS court_type,
              c.address AS court_address,
+             c.country_code AS court_country_code,
              COALESCE(c.is_registry, true) AS court_is_registry,
              ST_Y(c.location::geometry) AS court_lat,
              ST_X(c.location::geometry) AS court_lng,
@@ -827,6 +828,7 @@ export class MatchesService {
              u.username AS creator_username,
              c.id AS court_id, c.name AS court_name, c.type AS court_type,
              c.address AS court_address,
+             c.country_code AS court_country_code,
              COALESCE(c.is_registry, true) AS court_is_registry,
              ST_Y(c.location::geometry) AS court_lat,
              ST_X(c.location::geometry) AS court_lng

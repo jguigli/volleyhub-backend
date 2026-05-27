@@ -38,6 +38,10 @@ export class Court {
   @Column({ type: 'varchar', nullable: true })
   address: string | null;
 
+  /** ISO 3166-1 alpha-2 country code (e.g. "FR"). Display name is resolved client-side. */
+  @Column({ name: 'country_code', type: 'varchar', length: 2, nullable: true })
+  countryCode: string | null;
+
   /** True = lieu du référentiel (complexe / terrain connu), affiché en point bleu sur la carte */
   @Column({ name: 'is_registry', default: true })
   isRegistry: boolean;

@@ -4,6 +4,8 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Length,
+  Matches,
   Max,
   Min,
 } from 'class-validator';
@@ -30,4 +32,12 @@ export class CreateCourtDto {
   @IsString()
   @IsOptional()
   address?: string;
+
+  @IsString()
+  @IsOptional()
+  @Length(2, 2)
+  @Matches(/^[A-Z]{2}$/, {
+    message: 'countryCode must be a 2-letter ISO 3166-1 alpha-2 code (uppercase)',
+  })
+  countryCode?: string;
 }
